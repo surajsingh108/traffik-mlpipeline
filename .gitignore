@@ -34,3 +34,6 @@ model_metrics.jsonl
 
 # Temp
 *.tmp
+
+# Local handoff docs (kept on disk, not pushed)
+*HANDOFF*.md
