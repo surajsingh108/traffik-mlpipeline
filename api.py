@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 load_dotenv()
@@ -45,6 +46,13 @@ METRICS_FILE = MODEL_DIR / "metrics.json"
 _SE_HOLIDAYS = holidays.Sweden()
 
 app = FastAPI(title="Traffik ML API", description="Stockholm transit delay prediction")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 # ── model + config loaded once at startup ──────────────────────────────────────
 
