@@ -2,6 +2,8 @@
 
 An end-to-end MLOps pipeline that predicts SL transit delays in Stockholm using real-time departure data, weather, and a LightGBM champion/challenger model — deployed to Azure Container Apps.
 
+The dashboard lets anyone check if their bus, metro or train will be on time. Type a journey in plain English ("Bus 65 from Odenplan tomorrow at 8am") and Groq parses it into a prediction request in real time.
+
 **[Live Dashboard](https://surajsingh108.github.io/traffik-mlpipeline/) · [API Docs](https://traffik-api.ambitiousflower-45d3cfc8.swedencentral.azurecontainerapps.io/docs)**
 
 ---
@@ -9,6 +11,11 @@ An end-to-end MLOps pipeline that predicts SL transit delays in Stockholm using 
 ## Architecture
 
 ```
+  GitHub Pages dashboard
+        │
+        │  /predict  /delays  /weather
+        │  /groq/parse (Groq proxy)
+        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Azure Container Apps                                        │
 │                                                              │
@@ -18,6 +25,7 @@ An end-to-end MLOps pipeline that predicts SL transit delays in Stockholm using 
 │  │  /delays         │    │  Open-Meteo Weather → DuckDB │   │
 │  │  /weather        │    └──────────────────────────────┘   │
 │  │  /retrain        │                                        │
+│  │  /groq/parse     │──────────────────── Groq API          │
 │  └──────────────────┘                                        │
 │           │                                                  │
 │    DuckDB (data/traffik.duckdb)                              │
@@ -26,7 +34,6 @@ An end-to-end MLOps pipeline that predicts SL transit delays in Stockholm using 
    Trafiklab SL API          Open-Meteo API
    (departures)              (weather)
 
-Model: ghcr.io/surajsingh108/traffik-api
 Registry: GitHub Container Registry (free)
 CI/CD: GitHub Actions → GHCR → Azure Container Apps
 ```
@@ -70,6 +77,11 @@ curl -X POST /predict \
     "scheduled": "2025-07-03T08:15:00Z"
   }'
 
+# Parse a natural-language journey description (proxied to Groq server-side)
+curl -X POST /groq/parse \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Bus 65 from Odenplan tomorrow at 8am", "today": "2025-07-02"}'
+
 # Recent delays
 curl /delays
 
@@ -92,6 +104,7 @@ curl -X POST /retrain
 | Container | Docker, GitHub Container Registry |
 | Hosting | Azure Container Apps (scale-to-zero, free tier) |
 | Dashboard | GitHub Pages, Tailwind CSS, Chart.js |
+| NL parsing | Groq (llama-3.1-8b-instant), server-side proxy |
 | CI/CD | GitHub Actions |
 
 ## Project Structure
