@@ -33,6 +33,20 @@
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+
+    /* Ticker */
+    .ticker-wrap { overflow: hidden; width: 100%; }
+    .ticker-inner { display: flex; white-space: nowrap; will-change: transform; }
+    .ticker-inner.animate { animation: ticker-scroll linear infinite; }
+    @keyframes ticker-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+    /* Feature cards */
+    .feature-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 16px; }
+    .feature-card h4 { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; margin-bottom: 6px; }
+    .feature-card p { font-size: 0.8rem; color: #d1d5db; line-height: 1.5; }
+
+    /* NL input shimmer while parsing */
+    .parsing { opacity: 0.6; pointer-events: none; }
   </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen">
@@ -59,55 +73,61 @@
         <a href="https://traffik-api.ambitiousflower-45d3cfc8.swedencentral.azurecontainerapps.io/docs"
            target="_blank"
            class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1 rounded-md border border-white/10 hover:border-white/20">
-          API Docs ↗
+          API Docs
         </a>
         <a href="https://github.com/surajsingh108/traffik-mlpipeline"
            target="_blank"
            class="text-xs text-gray-400 hover:text-white transition-colors">
-          GitHub ↗
+          GitHub
         </a>
       </div>
     </div>
   </nav>
 
+  <!-- Live delay ticker -->
+  <div id="ticker-bar" class="relative z-10 border-b border-white/5 h-9 flex items-center bg-green-950/40">
+    <div class="ticker-wrap flex-1">
+      <div id="ticker-inner" class="ticker-inner text-xs text-green-400 gap-0">
+        <span id="ticker-content" class="px-4">Loading live departures…</span>
+      </div>
+    </div>
+  </div>
+
   <main class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
 
     <!-- Hero -->
-    <div class="text-center pt-4 pb-2">
+    <div class="text-center pt-2 pb-2">
       <h1 class="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-        Stockholm Transit <span class="text-blue-400">Delay Prediction</span>
+        Will your Stockholm commute <span class="text-blue-400">be on time?</span>
       </h1>
       <p class="mt-3 text-gray-400 max-w-xl mx-auto text-sm sm:text-base">
-        LightGBM model trained on real SL departure data. Predicts delay in minutes
-        using 21 features — calendar, route, weather, and rolling lag statistics.
+        Predicts SL bus, metro and train delays in real time using weather, calendar and route history.
       </p>
+
+      <!-- Natural language input -->
+      <div class="mt-6 max-w-2xl mx-auto">
+        <div class="flex gap-2">
+          <input
+            id="nl-input"
+            type="text"
+            placeholder='e.g. "Bus 65 from Odenplan tomorrow at 8am"'
+            class="flex-1 bg-gray-900 border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+          />
+          <button
+            id="nl-parse-btn"
+            class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-5 py-3 rounded-lg transition-colors whitespace-nowrap"
+          >
+            Parse
+          </button>
+        </div>
+        <p class="text-xs text-gray-600 mt-2 text-left">
+          Powered by Groq · fills the form below automatically
+        </p>
+        <p id="nl-error" class="hidden text-xs text-red-400 mt-2 text-left"></p>
+      </div>
     </div>
 
-    <!-- Stat cards -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      <div class="stat-card glass rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider">Test MAE</p>
-        <p class="text-2xl font-bold text-white mt-1" id="stat-mae">—</p>
-        <p class="text-xs text-gray-500 mt-1">minutes</p>
-      </div>
-      <div class="stat-card glass rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider">Test RMSE</p>
-        <p class="text-2xl font-bold text-white mt-1" id="stat-rmse">—</p>
-        <p class="text-xs text-gray-500 mt-1">minutes</p>
-      </div>
-      <div class="stat-card glass rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider">Train Rows</p>
-        <p class="text-2xl font-bold text-white mt-1" id="stat-train">—</p>
-        <p class="text-xs text-gray-500 mt-1">departures</p>
-      </div>
-      <div class="stat-card glass rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider">Features</p>
-        <p class="text-2xl font-bold text-white mt-1" id="stat-features">—</p>
-        <p class="text-xs text-gray-500 mt-1">dimensions</p>
-      </div>
-    </div>
-
-    <!-- Main grid -->
+    <!-- Main grid: predict form + network status -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
       <!-- Predict form -->
@@ -115,56 +135,77 @@
         <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-5">Predict Delay</h2>
         <form id="predict-form" class="space-y-4">
           <div>
-            <label class="text-xs text-gray-400 block mb-1">Transport Mode</label>
-            <select id="f-mode" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
-              <option value="TRAM">Tram</option>
-              <option value="BUS" selected>Bus</option>
-              <option value="TRAIN">Train</option>
-              <option value="METRO">Metro</option>
-              <option value="FERRY">Ferry</option>
+            <label class="text-xs text-gray-400 block mb-1">Station</label>
+            <select id="f-site" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+              <option value="9001">T-Centralen</option>
+              <option value="9180">Slussen</option>
+              <option value="9117">Fridhemsplan</option>
+              <option value="9192">Gullmarsplan</option>
+              <option value="9261" selected>Odenplan</option>
+              <option value="9530">Liljeholmen</option>
             </select>
           </div>
           <div>
-            <label class="text-xs text-gray-400 block mb-1">Site ID</label>
-            <input id="f-site" type="number" value="9001" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
-            <p class="text-xs text-gray-600 mt-1">e.g. 9001 = Stockholm Central</p>
+            <label class="text-xs text-gray-400 block mb-1">Transport Mode</label>
+            <select id="f-mode" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+              <option value="BUS" selected>Bus</option>
+              <option value="METRO">Metro (T-bana)</option>
+              <option value="TRAIN">Train (Pendeltåg)</option>
+              <option value="TRAM">Tram (Spårväg)</option>
+              <option value="FERRY">Ferry (Båt)</option>
+            </select>
           </div>
           <div>
-            <label class="text-xs text-gray-400 block mb-1">Line ID</label>
-            <input id="f-line" type="text" value="65" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
+            <label class="text-xs text-gray-400 block mb-1">Line number</label>
+            <input id="f-line" type="text" value="65" placeholder="e.g. 65, 4, 17, 41"
+              class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
+            <p class="text-xs text-gray-600 mt-1">Bus: 1 2 3 4 65 67 · Metro: 17 18 19 10 11 · Train: 35 36 40 41</p>
           </div>
           <div>
-            <label class="text-xs text-gray-400 block mb-1">Scheduled Departure</label>
-            <input id="f-time" type="datetime-local" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
+            <label class="text-xs text-gray-400 block mb-1">Scheduled departure</label>
+            <input id="f-time" type="datetime-local"
+              class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
           </div>
           <button type="submit"
             class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors">
-            Predict →
+            Predict delay
           </button>
         </form>
 
         <!-- Result -->
-        <div id="predict-result" class="hidden mt-5 rounded-lg bg-gray-900 border border-white/10 p-4 text-center">
-          <p class="text-xs text-gray-400 uppercase tracking-wider">Predicted Delay</p>
-          <p class="text-4xl font-bold text-white mt-1" id="result-value">—</p>
-          <p class="text-sm text-gray-400 mt-1">minutes</p>
+        <div id="predict-result" class="hidden mt-5 rounded-lg bg-gray-900 border border-white/10 p-5 text-center">
+          <p id="result-headline" class="text-lg font-bold text-white"></p>
+          <p class="text-3xl font-bold text-white mt-1" id="result-value">—</p>
+          <p class="text-sm text-gray-400 mt-1">minutes predicted delay</p>
           <div id="result-badge" class="inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium"></div>
+          <p id="result-weather" class="text-xs text-gray-500 mt-3"></p>
         </div>
         <div id="predict-error" class="hidden mt-5 rounded-lg bg-red-950 border border-red-800 p-4 text-sm text-red-300"></div>
       </div>
 
-      <!-- Delay chart -->
+      <!-- Network status -->
       <div class="lg:col-span-2 glass rounded-xl p-6">
-        <div class="flex items-center justify-between mb-5">
-          <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Recent Departures</h2>
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Live Network Status</h2>
           <span id="delay-count" class="text-xs text-gray-500"></span>
         </div>
         <p id="delay-staleness" class="text-xs text-yellow-500 mb-3 hidden"></p>
-        <div class="relative h-48 mb-6">
+
+        <!-- Mode summary chips -->
+        <div id="mode-summary" class="flex flex-wrap gap-2 mb-5"></div>
+
+        <!-- All-clear banner (shown when no delays) -->
+        <div id="all-clear-banner" class="hidden mb-5 rounded-lg bg-green-950 border border-green-800 px-4 py-3 text-sm text-green-300">
+          Stockholm transit running smoothly — no delays detected
+        </div>
+
+        <!-- Bar chart (shown when delays exist) -->
+        <div id="chart-wrap" class="hidden relative h-40 mb-5">
           <canvas id="delay-chart"></canvas>
         </div>
-        <!-- Table -->
-        <div class="overflow-auto max-h-48">
+
+        <!-- Departures table -->
+        <div class="overflow-auto max-h-52">
           <table class="w-full text-xs">
             <thead>
               <tr class="text-gray-500 border-b border-white/5">
@@ -180,16 +221,41 @@
       </div>
     </div>
 
-    <!-- Weather + model info row -->
+    <!-- Stat cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div class="stat-card glass rounded-xl p-4">
+        <p class="text-xs text-gray-400 uppercase tracking-wider">Avg error</p>
+        <p class="text-2xl font-bold text-white mt-1" id="stat-mae">—</p>
+        <p class="text-xs text-gray-500 mt-1">minutes</p>
+      </div>
+      <div class="stat-card glass rounded-xl p-4">
+        <p class="text-xs text-gray-400 uppercase tracking-wider">Typical error</p>
+        <p class="text-2xl font-bold text-white mt-1" id="stat-rmse">—</p>
+        <p class="text-xs text-gray-500 mt-1">minutes</p>
+      </div>
+      <div class="stat-card glass rounded-xl p-4">
+        <p class="text-xs text-gray-400 uppercase tracking-wider">Training trips</p>
+        <p class="text-2xl font-bold text-white mt-1" id="stat-train">—</p>
+        <p class="text-xs text-gray-500 mt-1">real SL departures</p>
+      </div>
+      <div class="stat-card glass rounded-xl p-4">
+        <p class="text-xs text-gray-400 uppercase tracking-wider">Input signals</p>
+        <p class="text-2xl font-bold text-white mt-1" id="stat-features">—</p>
+        <p class="text-xs text-gray-500 mt-1">features per prediction</p>
+      </div>
+    </div>
+    <p class="text-xs text-gray-600 -mt-4 px-1" id="stat-note"></p>
+
+    <!-- Weather + model info -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
       <!-- Weather -->
       <div class="glass rounded-xl p-6">
-        <div class="flex items-center gap-2 mb-5">
+        <div class="flex items-center gap-2 mb-4">
           <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Current Weather — Stockholm</h2>
           <span class="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-400 border border-green-800">Live</span>
         </div>
-        <div class="grid grid-cols-3 gap-4" id="weather-grid">
+        <div class="grid grid-cols-3 gap-4">
           <div class="text-center">
             <p class="text-2xl font-bold text-white" id="w-temp">—</p>
             <p class="text-xs text-gray-400 mt-1">Temperature °C</p>
@@ -208,40 +274,42 @@
           </div>
           <div class="text-center">
             <p class="text-2xl font-bold text-white" id="w-cloud">—</p>
-            <p class="text-xs text-gray-400 mt-1">Cloud Cover %</p>
+            <p class="text-xs text-gray-400 mt-1">Cloud cover %</p>
           </div>
           <div class="text-center">
             <p class="text-xs text-gray-500 mt-2" id="w-time">—</p>
             <p class="text-xs text-gray-600 mt-1">Last updated</p>
           </div>
         </div>
+        <p id="weather-risk" class="mt-4 text-xs text-gray-400 border-t border-white/5 pt-3"></p>
       </div>
 
-      <!-- Model info -->
+      <!-- How the model works -->
       <div class="glass rounded-xl p-6">
-        <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-5">Model Architecture</h2>
-        <div class="space-y-3 text-sm">
-          <div class="flex justify-between items-center py-2 border-b border-white/5">
+        <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-2">How the model works</h2>
+        <p class="text-xs text-gray-500 mb-4">A LightGBM regressor trained to minimise mean absolute error. A new model is promoted only if it beats the current champion by at least 2%.</p>
+        <div class="space-y-2 text-sm">
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
             <span class="text-gray-400">Algorithm</span>
-            <span class="text-white font-medium">LightGBM (MAE objective)</span>
+            <span class="text-white font-medium">LightGBM (gradient boosting)</span>
           </div>
-          <div class="flex justify-between items-center py-2 border-b border-white/5">
-            <span class="text-gray-400">Estimators</span>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-gray-400">Trees</span>
             <span class="text-white font-medium">400</span>
           </div>
-          <div class="flex justify-between items-center py-2 border-b border-white/5">
-            <span class="text-gray-400">Learning Rate</span>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-gray-400">Learning rate</span>
             <span class="text-white font-medium">0.05</span>
           </div>
-          <div class="flex justify-between items-center py-2 border-b border-white/5">
-            <span class="text-gray-400">Promotion Rule</span>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-gray-400">Promotion rule</span>
             <span class="text-white font-medium">New MAE &lt; Champion × 0.98</span>
           </div>
-          <div class="flex justify-between items-center py-2 border-b border-white/5">
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
             <span class="text-gray-400">Holdout</span>
             <span class="text-white font-medium">Last 7 days</span>
           </div>
-          <div class="flex justify-between items-center py-2">
+          <div class="flex justify-between items-center py-1.5">
             <span class="text-gray-400">Infrastructure</span>
             <span class="text-white font-medium">Azure Container Apps</span>
           </div>
@@ -249,48 +317,32 @@
       </div>
     </div>
 
-    <!-- Feature pills -->
+    <!-- What affects your delay -->
     <div class="glass rounded-xl p-6">
-      <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Feature Groups</h2>
-      <div class="flex flex-wrap gap-2" id="feature-pills">
-        <div class="flex flex-wrap gap-2">
-          <span class="text-xs px-3 py-1 rounded-full bg-blue-950 text-blue-300 border border-blue-800">Calendar</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">hour</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">hour_sin</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">hour_cos</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">day_of_week</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">is_weekend</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">is_holiday</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">month</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">morning_peak</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">evening_peak</span>
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">What affects your delay?</h2>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="feature-card">
+          <h4>Time of day</h4>
+          <p>Rush hour, weekend vs weekday, public holidays, month of year, morning and evening peaks</p>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="text-xs px-3 py-1 rounded-full bg-purple-950 text-purple-300 border border-purple-800">Route</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">transport_mode_enc</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">site_id_enc</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">line_id_enc</span>
+        <div class="feature-card">
+          <h4>Route</h4>
+          <p>Line number, departure stop, transport mode — bus, metro, train, tram or ferry</p>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="text-xs px-3 py-1 rounded-full bg-teal-950 text-teal-300 border border-teal-800">Weather</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">temperature</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">wind_speed</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">precipitation</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">snowfall</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">cloud_cover</span>
+        <div class="feature-card">
+          <h4>Weather</h4>
+          <p>Temperature, wind speed, rain, snowfall and cloud cover at departure time</p>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="text-xs px-3 py-1 rounded-full bg-orange-950 text-orange-300 border border-orange-800">Lags</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">lag_1h_mean</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">lag_24h_mean</span>
-          <span class="text-xs px-2 py-1 rounded-full bg-gray-900 text-gray-300 border border-white/10">rolling_6h_mean</span>
+        <div class="feature-card">
+          <h4>Recent history</h4>
+          <p>Average delay on this route in the last hour and last 24 hours</p>
         </div>
       </div>
     </div>
 
     <!-- Footer -->
     <footer class="text-center text-xs text-gray-600 py-4">
-      Built with LightGBM · FastAPI · Azure Container Apps · GitHub Pages ·
+      Built with LightGBM · FastAPI · Azure Container Apps · Groq · GitHub Pages ·
       <a href="https://github.com/surajsingh108/traffik-mlpipeline" class="hover:text-gray-400 transition-colors">
         surajsingh108/traffik-mlpipeline
       </a>
@@ -300,9 +352,20 @@
 
 <script>
 const API = 'https://traffik-api.ambitiousflower-45d3cfc8.swedencentral.azurecontainerapps.io';
-let delayChart = null;
 
-// Set default datetime to now + 1h
+const STATIONS = {
+  'T-Centralen':  9001,
+  'Slussen':      9180,
+  'Fridhemsplan': 9117,
+  'Gullmarsplan': 9192,
+  'Odenplan':     9261,
+  'Liljeholmen':  9530,
+};
+
+let delayChart = null;
+let lastDelays = [];
+
+// Default datetime = now + 1h
 const dt = new Date(Date.now() + 3600000);
 dt.setSeconds(0, 0);
 document.getElementById('f-time').value = dt.toISOString().slice(0, 16);
@@ -336,12 +399,62 @@ async function loadModelInfo() {
     const r = await fetch(`${API}/model/info`);
     const d = await r.json();
     if (d.metrics) {
-      document.getElementById('stat-mae').textContent = d.metrics.test_mae.toFixed(3);
+      const mae = d.metrics.test_mae;
+      document.getElementById('stat-mae').textContent = mae.toFixed(3);
       document.getElementById('stat-rmse').textContent = d.metrics.test_rmse.toFixed(3);
       document.getElementById('stat-train').textContent = d.metrics.n_train.toLocaleString();
       document.getElementById('stat-features').textContent = d.metrics.n_features;
+      const secs = Math.round(mae * 60);
+      document.getElementById('stat-note').textContent =
+        `Avg error ${mae.toFixed(3)} min = ~${secs} second${secs !== 1 ? 's' : ''} — well within SL's 1-minute reporting threshold.`;
     }
   } catch (e) { console.error('model/info', e); }
+}
+
+// ── ticker ───────────────────────────────────────────────────────────────────
+function updateTicker(delays) {
+  const bar = document.getElementById('ticker-bar');
+  const inner = document.getElementById('ticker-inner');
+  const delayed = delays.filter(x => (x.delay_minutes ?? 0) > 0);
+
+  if (delayed.length === 0) {
+    bar.className = 'relative z-10 border-b border-white/5 h-9 flex items-center bg-green-950/40';
+    inner.className = 'ticker-inner text-xs text-green-400';
+    inner.innerHTML = '<span class="px-6">All lines running on time — no delays detected</span>';
+    return;
+  }
+
+  bar.className = 'relative z-10 border-b border-white/5 h-9 flex items-center bg-amber-950/40';
+  inner.className = 'ticker-inner animate text-xs text-amber-300';
+
+  const items = delayed.map(x => {
+    const name = x.line_name || x.line_id;
+    const mode = x.transport_mode.charAt(0) + x.transport_mode.slice(1).toLowerCase();
+    const min = (x.delay_minutes ?? 0).toFixed(1);
+    const siteId = x.site_id;
+    const stationName = Object.entries(STATIONS).find(([,id]) => id === siteId)?.[0] || '';
+    return `<span class="px-6 cursor-pointer hover:text-white transition-colors"
+      data-line="${x.line_id}" data-mode="${x.transport_mode}" data-site="${siteId}"
+      onclick="fillFromTicker(this)">
+      ${mode} ${name}${stationName ? ' · ' + stationName : ''} · ${min} min late
+    </span>
+    <span class="px-2 text-amber-700">|</span>`;
+  }).join('');
+
+  // Duplicate content for seamless loop
+  inner.innerHTML = items + items;
+  const totalWidth = inner.scrollWidth / 2;
+  inner.style.animationDuration = `${Math.max(15, totalWidth / 60)}s`;
+}
+
+function fillFromTicker(el) {
+  const siteId = el.dataset.site;
+  const lineId = el.dataset.line;
+  const mode = el.dataset.mode;
+  document.getElementById('f-site').value = siteId;
+  document.getElementById('f-line').value = lineId;
+  document.getElementById('f-mode').value = mode;
+  document.getElementById('predict-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ── delays ───────────────────────────────────────────────────────────────────
@@ -350,6 +463,7 @@ async function loadDelays() {
     const r = await fetch(`${API}/delays`);
     const d = await r.json();
     if (!d.delays || d.delays.length === 0) return;
+    lastDelays = d.delays;
 
     document.getElementById('delay-count').textContent = `${d.delays.length} departures`;
 
@@ -358,62 +472,75 @@ async function loadDelays() {
     const ageMin = Math.round((Date.now() - newest.getTime()) / 60000);
     const staleEl = document.getElementById('delay-staleness');
     if (ageMin > 30) {
-      staleEl.textContent = `⚠ Data fetched ${ageMin} minutes ago — pipeline not running in container`;
+      staleEl.textContent = `Data fetched ${ageMin} minutes ago — pipeline may not be running`;
       staleEl.classList.remove('hidden');
     } else {
       staleEl.classList.add('hidden');
     }
 
-    // chart — bar of delay_minutes per row (last 20)
-    const rows = d.delays.slice(-20);
-    const labels = rows.map(x => x.line_name || x.line_id);
-    const values = rows.map(x => x.delay_minutes ?? 0);
-    const colors = values.map(v => v > 1 ? 'rgba(239,68,68,0.7)' : v > 0 ? 'rgba(251,191,36,0.7)' : 'rgba(34,197,94,0.7)');
-
-    const ctx = document.getElementById('delay-chart').getContext('2d');
-    if (delayChart) delayChart.destroy();
-    delayChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          data: values,
-          backgroundColor: colors,
-          borderRadius: 4,
-          borderSkipped: false,
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: ctx => `${ctx.raw.toFixed(2)} min delay` }
-        }},
-        scales: {
-          x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: { size: 10 } } },
-          y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: { size: 10 } }, title: { display: true, text: 'delay (min)', color: '#6b7280', font: { size: 10 } } }
-        }
+    // Mode summary chips
+    const modes = ['BUS', 'METRO', 'TRAIN', 'TRAM', 'FERRY'];
+    const modeAvg = {};
+    modes.forEach(m => {
+      const rows = d.delays.filter(x => x.transport_mode === m);
+      if (rows.length > 0) {
+        modeAvg[m] = rows.reduce((s, x) => s + (x.delay_minutes ?? 0), 0) / rows.length;
       }
     });
+    const modeEl = document.getElementById('mode-summary');
+    modeEl.innerHTML = Object.entries(modeAvg).map(([m, avg]) => {
+      const color = avg > 1 ? 'bg-red-950 text-red-300 border-red-800'
+                  : avg > 0 ? 'bg-amber-950 text-amber-300 border-amber-800'
+                  : 'bg-gray-900 text-gray-400 border-white/10';
+      return `<span class="text-xs px-3 py-1 rounded-full border ${color}">${m} ${avg.toFixed(1)} min</span>`;
+    }).join('');
 
-    // table
+    // All-clear vs chart
+    const anyDelayed = d.delays.some(x => (x.delay_minutes ?? 0) > 0);
+    document.getElementById('all-clear-banner').classList.toggle('hidden', anyDelayed);
+    document.getElementById('chart-wrap').classList.toggle('hidden', !anyDelayed);
+
+    if (anyDelayed) {
+      const rows = d.delays.slice(-20);
+      const labels = rows.map(x => x.line_name || x.line_id);
+      const values = rows.map(x => x.delay_minutes ?? 0);
+      const colors = values.map(v => v > 1 ? 'rgba(239,68,68,0.7)' : v > 0 ? 'rgba(251,191,36,0.7)' : 'rgba(34,197,94,0.7)');
+      const ctx = document.getElementById('delay-chart').getContext('2d');
+      if (delayChart) delayChart.destroy();
+      delayChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, borderSkipped: false }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw.toFixed(2)} min delay` } } },
+          scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: { size: 10 } } },
+            y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: { size: 10 } }, title: { display: true, text: 'delay (min)', color: '#6b7280', font: { size: 10 } } }
+          }
+        }
+      });
+    }
+
+    // Table
     const tbody = document.getElementById('delay-tbody');
     tbody.innerHTML = '';
     d.delays.slice().reverse().slice(0, 15).forEach(row => {
       const delay = row.delay_minutes ?? 0;
-      const color = delay > 1 ? 'text-red-400' : delay > 0 ? 'text-yellow-400' : 'text-green-400';
+      const color = delay > 1 ? 'text-red-400' : delay > 0 ? 'text-amber-400' : 'text-green-400';
       const t = new Date(row.scheduled).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-      tbody.innerHTML += `
-        <tr class="delay-row">
-          <td class="py-1.5 pr-3 text-white font-medium">${row.line_name || row.line_id}</td>
-          <td class="py-1.5 pr-3 text-gray-400">${row.transport_mode}</td>
-          <td class="py-1.5 pr-3 text-gray-400">${t}</td>
-          <td class="py-1.5 text-right ${color} font-medium">${delay > 0 ? '+' : ''}${delay.toFixed(1)}m</td>
-        </tr>`;
+      tbody.innerHTML += `<tr class="delay-row">
+        <td class="py-1.5 pr-3 text-white font-medium">${row.line_name || row.line_id}</td>
+        <td class="py-1.5 pr-3 text-gray-400">${row.transport_mode}</td>
+        <td class="py-1.5 pr-3 text-gray-400">${t}</td>
+        <td class="py-1.5 text-right ${color} font-medium">${delay > 0 ? '+' : ''}${delay.toFixed(1)}m</td>
+      </tr>`;
     });
+
+    updateTicker(d.delays);
   } catch (e) { console.error('delays', e); }
 }
 
-// ── weather — live from Open-Meteo (Stockholm) ───────────────────────────────
+// ── weather ───────────────────────────────────────────────────────────────────
 async function loadWeather() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast'
@@ -429,31 +556,40 @@ async function loadWeather() {
     document.getElementById('w-precip').textContent = fmt(c.precipitation);
     document.getElementById('w-snow').textContent = fmt(c.snowfall);
     document.getElementById('w-cloud').textContent = fmt(c.cloud_cover);
-    const ts = new Date(c.time);
-    document.getElementById('w-time').textContent = ts.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('w-time').textContent =
+      new Date(c.time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+
+    // Plain-English risk line
+    const snow = c.snowfall ?? 0;
+    const wind = c.wind_speed_10m ?? 0;
+    const rain = c.precipitation ?? 0;
+    let risk;
+    if (snow > 0) risk = 'Snow detected — expect possible minor delays across all lines.';
+    else if (wind > 40) risk = 'High winds — ferry and tram services may be affected.';
+    else if (rain > 2) risk = 'Heavy rain — allow extra time for surface routes.';
+    else risk = 'Conditions look normal — low weather-related delay risk.';
+    document.getElementById('weather-risk').textContent = risk;
   } catch (e) { console.error('weather', e); }
 }
 
 // ── predict form ─────────────────────────────────────────────────────────────
 document.getElementById('predict-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const btn = e.target.querySelector('button');
+  const btn = e.target.querySelector('button[type=submit]');
   btn.textContent = 'Predicting…';
   btn.disabled = true;
 
+  const siteId = parseInt(document.getElementById('f-site').value);
+  const stationName = document.getElementById('f-site').selectedOptions[0].text;
+  const lineId = document.getElementById('f-line').value.trim();
+  const mode = document.getElementById('f-mode').value;
   const scheduled = new Date(document.getElementById('f-time').value).toISOString();
-  const body = {
-    site_id: parseInt(document.getElementById('f-site').value),
-    line_id: document.getElementById('f-line').value.trim(),
-    transport_mode: document.getElementById('f-mode').value,
-    scheduled,
-  };
 
   try {
     const r = await fetch(`${API}/predict`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ site_id: siteId, line_id: lineId, transport_mode: mode, scheduled }),
     });
     const d = await r.json();
     document.getElementById('predict-error').classList.add('hidden');
@@ -466,24 +602,116 @@ document.getElementById('predict-form').addEventListener('submit', async e => {
       resultEl.classList.add('hidden');
     } else {
       const delay = d.delay_minutes;
+      const modeLabel = mode.charAt(0) + mode.slice(1).toLowerCase();
+      document.getElementById('result-headline').textContent = `${modeLabel} ${lineId} from ${stationName}`;
       document.getElementById('result-value').textContent = delay.toFixed(2);
+
       const badge = document.getElementById('result-badge');
       if (delay < 0.5) {
         badge.textContent = 'On time';
         badge.className = 'inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300';
       } else if (delay < 2) {
         badge.textContent = 'Minor delay';
-        badge.className = 'inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300';
+        badge.className = 'inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium bg-amber-900 text-amber-300';
       } else {
         badge.textContent = 'Significant delay';
         badge.className = 'inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium bg-red-900 text-red-300';
       }
+
+      // Weather context from response
+      const w = d.weather_used || {};
+      const parts = [];
+      if (w.temperature != null) parts.push(`${w.temperature.toFixed(0)} °C`);
+      if (w.precipitation != null && w.precipitation > 0) parts.push(`${w.precipitation.toFixed(1)} mm rain`);
+      if (w.snowfall != null && w.snowfall > 0) parts.push(`${w.snowfall.toFixed(1)} mm snow`);
+      if (w.wind_speed != null) parts.push(`${w.wind_speed.toFixed(0)} km/h wind`);
+      document.getElementById('result-weather').textContent =
+        parts.length ? `Weather used: ${parts.join(', ')}` : '';
     }
   } catch (err) {
     document.getElementById('predict-error').textContent = 'Request failed: ' + err.message;
     document.getElementById('predict-error').classList.remove('hidden');
   } finally {
-    btn.textContent = 'Predict →';
+    btn.textContent = 'Predict delay';
+    btn.disabled = false;
+  }
+});
+
+// ── Groq rate limit: 5 calls per 30 min ──────────────────────────────────────
+const GROQ_LIMIT = 5;
+const GROQ_WINDOW_MS = 30 * 60 * 1000;
+const groqCallLog = []; // timestamps of recent calls
+
+function groqAllowed() {
+  const now = Date.now();
+  // Drop calls older than the window
+  while (groqCallLog.length && now - groqCallLog[0] > GROQ_WINDOW_MS) groqCallLog.shift();
+  return groqCallLog.length < GROQ_LIMIT;
+}
+
+function groqRecord() {
+  groqCallLog.push(Date.now());
+}
+
+// ── Groq NL parse ─────────────────────────────────────────────────────────────
+document.getElementById('nl-parse-btn').addEventListener('click', async () => {
+  const text = document.getElementById('nl-input').value.trim();
+  if (!text) return;
+
+  const btn = document.getElementById('nl-parse-btn');
+  const errEl = document.getElementById('nl-error');
+  errEl.classList.add('hidden');
+
+  if (!groqAllowed()) {
+    const remaining = Math.ceil((GROQ_WINDOW_MS - (Date.now() - groqCallLog[0])) / 60000);
+    errEl.textContent = `Rate limit reached (5 per 30 min). Try again in ~${remaining} minute${remaining !== 1 ? 's' : ''}.`;
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  btn.textContent = 'Parsing…';
+  btn.disabled = true;
+
+  try {
+    groqRecord();
+    const r = await fetch(`${API}/groq/parse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, today: new Date().toISOString().slice(0, 10) }),
+    });
+
+    if (!r.ok) throw new Error(`Server error ${r.status}`);
+
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const parsed = data.result;
+    if (!parsed) throw new Error('Could not understand — please fill the form manually.');
+
+    // Fill form fields
+    if (parsed.station && STATIONS[parsed.station]) {
+      document.getElementById('f-site').value = STATIONS[parsed.station];
+    }
+    if (parsed.line_id) {
+      document.getElementById('f-line').value = parsed.line_id;
+    }
+    if (parsed.transport_mode) {
+      document.getElementById('f-mode').value = parsed.transport_mode;
+    }
+    if (parsed.scheduled_iso) {
+      const d = new Date(parsed.scheduled_iso);
+      if (!isNaN(d)) {
+        d.setSeconds(0, 0);
+        document.getElementById('f-time').value = d.toISOString().slice(0, 16);
+      }
+    }
+
+    document.getElementById('predict-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  } catch (err) {
+    errEl.textContent = err.message || 'Parse failed — please fill the form manually.';
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.textContent = 'Parse';
     btn.disabled = false;
   }
 });
