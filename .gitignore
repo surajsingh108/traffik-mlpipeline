@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# Model artifacts
+model/*.pkl
+model/*.pkl.bak
+
+# Data
+*.duckdb
+data/
+
+# MLflow
+mlflow.db
+mlruns/
+model_metrics.jsonl
+
+# Azure / cloud creds
+*.json
+!model/config.json
+!model/metrics.json
+
+# IDE
+.vscode/
+.idea/
+
+# Temp
+*.tmp

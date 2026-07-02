@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "traffik-mlpipeline"
+version = "0.1.0"
+description = "Stockholm SL transit delay prediction — Azure MLOps pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    # Data pipeline
+    "duckdb",
+    "openmeteo-requests",
+    "requests-cache",
+    "retry-requests",
+    "requests",
+    "python-dotenv",
+    # ML
+    "lightgbm",
+    "scikit-learn",
+    "numpy",
+    "pandas",
+    "holidays",
+    # MLflow + Azure storage
+    "mlflow",
+    "azure-storage-blob",
+    # Serving
+    "fastapi",
+    "uvicorn[standard]",
+    # Dashboard
+    "streamlit",
+    "plotly",
+    # LLM digest
+    "groq",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest",
+    "pytest-cov",
+    "pandas-stubs",
+    "types-requests",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["transit*", "agent*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
