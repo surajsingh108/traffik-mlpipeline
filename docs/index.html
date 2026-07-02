@@ -159,6 +159,7 @@
           <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Recent Departures</h2>
           <span id="delay-count" class="text-xs text-gray-500"></span>
         </div>
+        <p id="delay-staleness" class="text-xs text-yellow-500 mb-3 hidden"></p>
         <div class="relative h-48 mb-6">
           <canvas id="delay-chart"></canvas>
         </div>
@@ -184,7 +185,10 @@
 
       <!-- Weather -->
       <div class="glass rounded-xl p-6">
-        <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-5">Current Weather — Stockholm</h2>
+        <div class="flex items-center gap-2 mb-5">
+          <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Current Weather — Stockholm</h2>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-400 border border-green-800">Live</span>
+        </div>
         <div class="grid grid-cols-3 gap-4" id="weather-grid">
           <div class="text-center">
             <p class="text-2xl font-bold text-white" id="w-temp">—</p>
@@ -347,7 +351,18 @@ async function loadDelays() {
     const d = await r.json();
     if (!d.delays || d.delays.length === 0) return;
 
-    document.getElementById('delay-count').textContent = `${d.delays.length} recent departures`;
+    document.getElementById('delay-count').textContent = `${d.delays.length} departures`;
+
+    // Staleness warning
+    const newest = new Date(d.delays[d.delays.length - 1].fetched_at);
+    const ageMin = Math.round((Date.now() - newest.getTime()) / 60000);
+    const staleEl = document.getElementById('delay-staleness');
+    if (ageMin > 30) {
+      staleEl.textContent = `⚠ Data fetched ${ageMin} minutes ago — pipeline not running in container`;
+      staleEl.classList.remove('hidden');
+    } else {
+      staleEl.classList.add('hidden');
+    }
 
     // chart — bar of delay_minutes per row (last 20)
     const rows = d.delays.slice(-20);
@@ -398,20 +413,23 @@ async function loadDelays() {
   } catch (e) { console.error('delays', e); }
 }
 
-// ── weather ──────────────────────────────────────────────────────────────────
+// ── weather — live from Open-Meteo (Stockholm) ───────────────────────────────
 async function loadWeather() {
   try {
-    const r = await fetch(`${API}/weather`);
+    const url = 'https://api.open-meteo.com/v1/forecast'
+      + '?latitude=59.3293&longitude=18.0686'
+      + '&current=temperature_2m,wind_speed_10m,precipitation,snowfall,cloud_cover'
+      + '&wind_speed_unit=kmh&timezone=Europe%2FStockholm';
+    const r = await fetch(url);
     const d = await r.json();
-    if (!d.weather || d.weather.length === 0) return;
-    const latest = d.weather[d.weather.length - 1];
+    const c = d.current;
     const fmt = v => v != null ? v.toFixed(1) : '—';
-    document.getElementById('w-temp').textContent = fmt(latest.temperature);
-    document.getElementById('w-wind').textContent = fmt(latest.wind_speed);
-    document.getElementById('w-precip').textContent = fmt(latest.precipitation);
-    document.getElementById('w-snow').textContent = fmt(latest.snowfall);
-    document.getElementById('w-cloud').textContent = fmt(latest.cloud_cover);
-    const ts = new Date(latest.timestamp);
+    document.getElementById('w-temp').textContent = fmt(c.temperature_2m);
+    document.getElementById('w-wind').textContent = fmt(c.wind_speed_10m);
+    document.getElementById('w-precip').textContent = fmt(c.precipitation);
+    document.getElementById('w-snow').textContent = fmt(c.snowfall);
+    document.getElementById('w-cloud').textContent = fmt(c.cloud_cover);
+    const ts = new Date(c.time);
     document.getElementById('w-time').textContent = ts.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
   } catch (e) { console.error('weather', e); }
 }
