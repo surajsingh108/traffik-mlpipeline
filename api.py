@@ -327,6 +327,13 @@ async def predict(req: PredictRequest):
         except Exception:
             pass  # proceed with NaN weather — model handles it
 
+    line_id_map: dict[str, int] = _config.get("line_id_map", {})
+    site_id_map: dict[str, int] = {str(k): v for k, v in _config.get("site_id_map", {}).items()}
+    known_route = (
+        str(req.line_id) in line_id_map
+        and str(req.site_id) in site_id_map
+    )
+
     try:
         X = _build_row(
             site_id=req.site_id,
@@ -346,6 +353,7 @@ async def predict(req: PredictRequest):
 
     return {
         "delay_minutes": round(pred, 2),
+        "known_route":    known_route,
         "site_id":        req.site_id,
         "line_id":        req.line_id,
         "transport_mode": req.transport_mode,

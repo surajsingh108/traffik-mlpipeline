@@ -178,6 +178,9 @@
           <p class="text-3xl font-bold text-white mt-1" id="result-value">—</p>
           <p class="text-sm text-gray-400 mt-1">minutes predicted delay</p>
           <div id="result-badge" class="inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium"></div>
+          <p id="result-unknown-route" class="hidden text-xs text-yellow-500 mt-3 border border-yellow-800 rounded px-2 py-1 bg-yellow-950">
+            This line was not seen in training data — prediction is an estimate only.
+          </p>
           <p id="result-weather" class="text-xs text-gray-500 mt-3"></p>
         </div>
         <div id="predict-error" class="hidden mt-5 rounded-lg bg-red-950 border border-red-800 p-4 text-sm text-red-300"></div>
@@ -617,6 +620,10 @@ document.getElementById('predict-form').addEventListener('submit', async e => {
         badge.textContent = 'Significant delay';
         badge.className = 'inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium bg-red-900 text-red-300';
       }
+
+      // Unknown route warning
+      const unknownEl = document.getElementById('result-unknown-route');
+      unknownEl.classList.toggle('hidden', d.known_route !== false);
 
       // Weather context from response
       const w = d.weather_used || {};
