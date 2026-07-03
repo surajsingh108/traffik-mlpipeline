@@ -240,7 +240,7 @@ def build_features(
             fetched_at, site_id, line_id, line_name,
             transport_mode, direction, destination,
             scheduled, expected, delay_minutes
-        FROM delays
+        FROM latest_delays
         WHERE delay_minutes IS NOT NULL
         ORDER BY scheduled
     """).fetchdf()

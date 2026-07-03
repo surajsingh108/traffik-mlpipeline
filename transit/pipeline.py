@@ -76,6 +76,17 @@ CREATE TABLE IF NOT EXISTS retrain_log (
     retrained   BOOLEAN,
     mae         DOUBLE
 );
+
+-- Latest snapshot per departure — used by training to get true final delay.
+-- With frequent polling, a departure appears many times; the last fetch before
+-- it departs is the most accurate delay reading.
+CREATE OR REPLACE VIEW latest_delays AS
+SELECT DISTINCT ON (site_id, line_id, scheduled)
+    fetched_at, site_id, line_id, line_name,
+    transport_mode, direction, destination,
+    scheduled, expected, delay_minutes
+FROM delays
+ORDER BY site_id, line_id, scheduled, fetched_at DESC;
 """
 
 
