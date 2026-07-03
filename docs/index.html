@@ -713,7 +713,7 @@ async function renderUpcoming(departures) {
   document.getElementById('upcoming-table').classList.remove('hidden');
 }
 
-async function loadUpcoming() {
+async function loadUpcoming(allowAutoSwitch = true) {
   const siteEl  = document.getElementById('f-site');
   const siteId  = siteEl.value;
   const loadEl  = document.getElementById('upcoming-loading');
@@ -754,20 +754,21 @@ async function loadUpcoming() {
     if (d.error) { errEl.textContent = d.error; errEl.classList.remove('hidden'); return; }
 
     if (!d.departures || d.departures.length === 0) {
-      // If filtered and empty, check if this line runs at a different station
-      if (activeFilter?.line_id) {
+      // If filtered and empty, try one auto-switch to a station where this line runs.
+      // allowAutoSwitch=false on the recursive call prevents an infinite loop when
+      // the line has no departures at any monitored station in this window.
+      if (activeFilter?.line_id && allowAutoSwitch) {
         let whereUrl = `${API}/where?line_id=${encodeURIComponent(activeFilter.line_id)}`;
         if (activeFilter.transport_mode) whereUrl += `&transport_mode=${encodeURIComponent(activeFilter.transport_mode)}`;
         const wr = await fetch(whereUrl);
         const wd = await wr.json();
         const altSite = (wd.site_ids || []).find(id => String(id) !== String(siteId));
         if (altSite) {
-          // Auto-switch station and reload
           siteEl.value = String(altSite);
           const stationName = siteEl.selectedOptions[0]?.text || altSite;
           emptyEl.textContent = `Switched to ${stationName} — that's where ${activeFilter.line_id} runs.`;
           emptyEl.classList.remove('hidden');
-          await loadUpcoming();
+          await loadUpcoming(false);
           return;
         }
       }
