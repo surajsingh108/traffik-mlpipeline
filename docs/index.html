@@ -728,18 +728,9 @@ async function loadUpcoming(allowAutoSwitch = true) {
   const errEl   = document.getElementById('upcoming-error');
   const tbl     = document.getElementById('upcoming-table');
 
-  // Clear from-time if it has drifted into the past — empty means "now".
-  // Avoids timezone display issues; the API defaults to current time when
-  // from_time is omitted.
   const fromField = document.getElementById('from-time');
   const fromNote  = document.getElementById('from-time-note');
-  if (fromField.value && new Date(fromField.value) < new Date()) {
-    fromField.value = '';
-    fromNote.classList.remove('hidden');
-    setTimeout(() => fromNote.classList.add('hidden'), 3000);
-  } else {
-    fromNote.classList.add('hidden');
-  }
+  fromNote.classList.add('hidden');
 
   loadEl.classList.remove('hidden');
   emptyEl.classList.add('hidden');
@@ -852,7 +843,8 @@ const GROQ_SYSTEM =
   'Liljeholmen, Solna centrum, Sundbyberg — closest match or null), ' +
   '"line_id" (string digits only e.g. "65", or null), ' +
   '"transport_mode" (one of BUS METRO TRAIN TRAM FERRY or null), ' +
-  '"scheduled_iso" (ISO 8601 datetime or null; interpret relative dates from today). ' +
+  '"scheduled_iso" (ISO 8601 datetime or null; only set for a specific clock time like "at 8am" or "tomorrow morning" — do NOT set for relative windows like "next hour" or "in 30 minutes"), ' +
+  '"window_minutes" (integer: how far ahead to look — 30 for "next 30 min", 60 for "next hour" or "coming hour", 120 for "next 2 hours" — default null meaning keep current window). ' +
   'If a field cannot be inferred return null. No explanation, only JSON.';
 
 // ── Groq NL parse ─────────────────────────────────────────────────────────────
@@ -936,15 +928,21 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
       fromField.value = '';
     }
 
+    // Apply window if Groq extracted one (e.g. "next hour" → 60)
+    if (parsed.window_minutes && [30, 60, 120].includes(parsed.window_minutes)) {
+      setWindow(parsed.window_minutes);
+    }
+
     // Set active line filter and reload departure board
+    const mode = parsed.transport_mode ? parsed.transport_mode.toUpperCase() : null;
     const filterLabel = [
-      parsed.transport_mode ? parsed.transport_mode.charAt(0) + parsed.transport_mode.slice(1).toLowerCase() : null,
+      mode ? mode.charAt(0) + mode.slice(1).toLowerCase() : null,
       parsed.line_id,
     ].filter(Boolean).join(' ');
 
     const newFilter = {
-      line_id:        parsed.line_id        || null,
-      transport_mode: parsed.transport_mode || null,
+      line_id:        parsed.line_id || null,
+      transport_mode: mode,
     };
     activeFilter = (newFilter.line_id || newFilter.transport_mode) ? newFilter : null;
 

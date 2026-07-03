@@ -78,11 +78,13 @@ def _main(force: bool = False) -> None:
     log.info("Sync complete: +%d delays  +%d weather", new_delays, sync_result["weather"])
 
     # ── 4. Freshness check ─────────────────────────────────────────────────────
+    # Close the write connection before freshness check opens its own read-only
+    # connection — DuckDB does not allow concurrent connections with mixed modes.
+    con.close()
     if not check_freshness(send_alert_fn=send_slack_alert):
         log.warning("Stale data detected — skipping retrain")
-        _write_retrain_log(con, new_delays, retrained=False, mae=None)
-        con.close()
         raise SystemExit(0)
+    con = duckdb.connect(DB_PATH)
 
     # ── 5. Retrain decision ────────────────────────────────────────────────────
     total_delays = _row_count(con, "delays")

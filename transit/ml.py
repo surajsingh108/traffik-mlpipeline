@@ -160,11 +160,18 @@ def train(con, force: bool = False) -> dict:
     """
     _require_lgb()
 
-    from transit.features import build_features, make_feature_cols, TRANSPORT_MODE_MAP, LINE_ID_MAP, SITE_ID_MAP
+    import transit.features as _feat
+    from transit.features import build_features, make_feature_cols
 
     log.info("Building features for training …")
     df = build_features(con, mode="train", min_rows=20)
     feat_cols = make_feature_cols(df)
+
+    # Read maps from the module AFTER build_features() has repopulated them.
+    # Importing by name above would snapshot the empty dicts at import time.
+    TRANSPORT_MODE_MAP = _feat.TRANSPORT_MODE_MAP
+    LINE_ID_MAP        = _feat.LINE_ID_MAP
+    SITE_ID_MAP        = _feat.SITE_ID_MAP
 
     if not feat_cols:
         raise RuntimeError("No feature columns available — check features.py")
