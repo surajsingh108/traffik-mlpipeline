@@ -37,3 +37,4 @@ model_metrics.jsonl
 
 # Local handoff docs (kept on disk, not pushed)
 *HANDOFF*.md
+DEVELOPER.md
