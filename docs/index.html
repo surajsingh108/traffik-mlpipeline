@@ -580,8 +580,26 @@ function delayBadge(delay, known) {
   return              `<span class="px-2 py-0.5 rounded-full bg-red-900 text-red-300 text-xs"${warn}>+${delay.toFixed(1)} min</span>`;
 }
 
+async function renderUpcoming(departures) {
+  const tbody = document.getElementById('upcoming-tbody');
+  tbody.innerHTML = '';
+  departures.forEach(dep => {
+    const t = new Date(dep.scheduled).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' });
+    const name = dep.line_name || dep.line_id;
+    const dest = dep.destination || '—';
+    tbody.innerHTML += `<tr class="delay-row">
+      <td class="py-1.5 pr-3 text-white font-medium">${t}</td>
+      <td class="py-1.5 pr-3 text-white">${name}</td>
+      <td class="py-1.5 pr-3 text-gray-400 truncate max-w-[80px]">${dest}</td>
+      <td class="py-1.5 text-right">${delayBadge(dep.delay_minutes, dep.known_route)}</td>
+    </tr>`;
+  });
+  document.getElementById('upcoming-table').classList.remove('hidden');
+}
+
 async function loadUpcoming() {
-  const siteId = document.getElementById('f-site').value;
+  const siteEl  = document.getElementById('f-site');
+  const siteId  = siteEl.value;
   const loadEl  = document.getElementById('upcoming-loading');
   const emptyEl = document.getElementById('upcoming-empty');
   const errEl   = document.getElementById('upcoming-error');
@@ -602,22 +620,31 @@ async function loadUpcoming() {
     loadEl.classList.add('hidden');
 
     if (d.error) { errEl.textContent = d.error; errEl.classList.remove('hidden'); return; }
-    if (!d.departures || d.departures.length === 0) { emptyEl.classList.remove('hidden'); return; }
 
-    const tbody = document.getElementById('upcoming-tbody');
-    tbody.innerHTML = '';
-    d.departures.forEach(dep => {
-      const t = new Date(dep.scheduled).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' });
-      const name = dep.line_name || dep.line_id;
-      const dest = dep.destination || '—';
-      tbody.innerHTML += `<tr class="delay-row">
-        <td class="py-1.5 pr-3 text-white font-medium">${t}</td>
-        <td class="py-1.5 pr-3 text-white">${name}</td>
-        <td class="py-1.5 pr-3 text-gray-400 truncate max-w-[80px]">${dest}</td>
-        <td class="py-1.5 text-right">${delayBadge(dep.delay_minutes, dep.known_route)}</td>
-      </tr>`;
-    });
-    tbl.classList.remove('hidden');
+    if (!d.departures || d.departures.length === 0) {
+      // If filtered and empty, check if this line runs at a different station
+      if (activeFilter?.line_id) {
+        let whereUrl = `${API}/where?line_id=${encodeURIComponent(activeFilter.line_id)}`;
+        if (activeFilter.transport_mode) whereUrl += `&transport_mode=${encodeURIComponent(activeFilter.transport_mode)}`;
+        const wr = await fetch(whereUrl);
+        const wd = await wr.json();
+        const altSite = (wd.site_ids || []).find(id => String(id) !== String(siteId));
+        if (altSite) {
+          // Auto-switch station and reload
+          siteEl.value = String(altSite);
+          const stationName = siteEl.selectedOptions[0]?.text || altSite;
+          emptyEl.textContent = `Switched to ${stationName} — that's where ${activeFilter.line_id} runs.`;
+          emptyEl.classList.remove('hidden');
+          await loadUpcoming();
+          return;
+        }
+      }
+      emptyEl.textContent = 'No departures in the next 30 min. Data refreshes every 15 min.';
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+
+    await renderUpcoming(d.departures);
   } catch (e) {
     loadEl.classList.add('hidden');
     errEl.textContent = 'Could not load departures.';

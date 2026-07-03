@@ -501,6 +501,30 @@ async def get_upcoming(
         return {"departures": [], "error": str(exc)}
 
 
+@app.get("/where")
+async def find_stations(line_id: str, transport_mode: str | None = None):
+    """
+    Return site_ids where a given line has been seen in the delays table.
+
+    Used by the dashboard to auto-switch station when the selected stop
+    doesn't serve the requested line (e.g. Metro 10 at Odenplan).
+    """
+    try:
+        conn = _get_db()
+        extra = " AND transport_mode = ?" if transport_mode else ""
+        params: list = [line_id]
+        if transport_mode:
+            params.append(transport_mode)
+        df = conn.execute(
+            f"SELECT DISTINCT site_id FROM delays WHERE line_id = ?{extra}",
+            params,
+        ).df()
+        conn.close()
+        return {"site_ids": [int(x) for x in df["site_id"].tolist()]}
+    except Exception as exc:
+        return {"site_ids": [], "error": str(exc)}
+
+
 @app.get("/config")
 async def get_config():
     """
