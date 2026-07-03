@@ -781,6 +781,7 @@ async function loadUpcoming(allowAutoSwitch = true) {
       }
       emptyEl.textContent = `No departures in the next ${windowMinutes} min. Data refreshes every 15 min.`;
       emptyEl.classList.remove('hidden');
+      document.getElementById('report-card').classList.add('hidden');
       return;
     }
 
@@ -935,6 +936,9 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
       line_id:        parsed.line_id        || null,
       transport_mode: parsed.transport_mode || null,
     };
+
+    // Clear stale report from previous query immediately
+    document.getElementById('report-card').classList.add('hidden');
 
     if (filterLabel) {
       document.getElementById('filter-label').textContent = filterLabel;
