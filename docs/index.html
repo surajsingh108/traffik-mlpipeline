@@ -736,7 +736,12 @@ async function loadUpcoming() {
 
   try {
     const fromVal = fromField.value;
-    const fromISO = fromVal ? new Date(fromVal).toISOString() : '';
+    const fromDate = fromVal ? new Date(fromVal) : null;
+    // Only send from_time when it's meaningfully in the future (>5 min).
+    // Otherwise let the API default to now, which avoids cutting off
+    // departures that are happening right at this moment.
+    const isFuture = fromDate && (fromDate - new Date()) > 5 * 60 * 1000;
+    const fromISO = isFuture ? fromDate.toISOString() : '';
     let url = `${API}/upcoming?site_id=${siteId}&window_minutes=${windowMinutes}`;
     if (fromISO) url += `&from_time=${encodeURIComponent(fromISO)}`;
     if (activeFilter?.line_id)        url += `&line_id=${encodeURIComponent(activeFilter.line_id)}`;
