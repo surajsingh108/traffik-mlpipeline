@@ -620,17 +620,8 @@ function setWindow(mins) {
   loadUpcoming();
 }
 
-// Init from-time to now, update on focus if blank/past
-function resetFromTime() {
-  const f = document.getElementById('from-time');
-  const cur = f.value ? new Date(f.value) : null;
-  if (!cur || cur <= new Date()) {
-    const dt = new Date();
-    dt.setSeconds(0, 0);
-    f.value = toLocalISO(dt);
-  }
-}
-resetFromTime();
+// Leave from-time empty by default — empty means "now" and avoids all timezone
+// display issues. Only set it when Groq returns a specific future time.
 document.getElementById('from-time').addEventListener('change', loadUpcoming);
 
 function delayBadge(delay, known) {
@@ -728,12 +719,12 @@ async function loadUpcoming(allowAutoSwitch = true) {
   const errEl   = document.getElementById('upcoming-error');
   const tbl     = document.getElementById('upcoming-table');
 
-  // Auto-reset from-time if it drifted into the past (stale page session)
+  // Clear from-time if it has drifted into the past — empty means "now".
+  // Avoids timezone display issues; the API defaults to current time when
+  // from_time is omitted.
   const fromField = document.getElementById('from-time');
   if (fromField.value && new Date(fromField.value) < new Date()) {
-    const dt = new Date();
-    dt.setSeconds(0, 0);
-    fromField.value = toLocalISO(dt);
+    fromField.value = '';
   }
 
   loadEl.classList.remove('hidden');
