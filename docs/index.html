@@ -200,6 +200,7 @@
             <tbody id="upcoming-tbody" class="divide-y divide-white/5"></tbody>
           </table>
         </div>
+        <p class="text-xs text-gray-600 mt-3">LightGBM model · click any row for prediction factors</p>
       </div>
 
       <!-- Network status -->
@@ -426,7 +427,7 @@ async function loadModelInfo() {
       document.getElementById('stat-train').textContent    = d.metrics.n_train.toLocaleString();
       document.getElementById('stat-features').textContent = d.metrics.n_features;
       document.getElementById('stat-note').textContent =
-        `Model predicts within ~${maeSecs} second${maeSecs !== 1 ? 's' : ''} on average — well within SL's 1-minute reporting threshold.`;
+        `LightGBM · predicts within ~${maeSecs} second${maeSecs !== 1 ? 's' : ''} on average — well within SL's 1-minute reporting threshold.`;
     }
   } catch (e) { console.error('model/info', e); }
 }
@@ -516,7 +517,7 @@ async function loadDelays() {
       const color = avg >= 2   ? 'bg-red-950 text-red-300 border-red-800'
                   : avg >= 0.5 ? 'bg-amber-950 text-amber-300 border-amber-800'
                   : 'bg-gray-900 text-gray-400 border-white/10';
-      return `<span class="text-xs px-3 py-1 rounded-full border ${color}">${m} ${avg.toFixed(1)} min</span>`;
+      return `<span class="text-xs px-3 py-1 rounded-full border ${color}">${modeIcon(m)} ${m} ${avg.toFixed(1)} min</span>`;
     }).join('');
 
     // All-clear vs chart
@@ -554,7 +555,7 @@ async function loadDelays() {
       const t = new Date(row.scheduled).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
       tbody.innerHTML += `<tr class="delay-row">
         <td class="py-1.5 pr-3 text-white font-medium">${row.line_name || row.line_id}</td>
-        <td class="py-1.5 pr-3 text-gray-400">${row.transport_mode}</td>
+        <td class="py-1.5 pr-3 text-gray-400">${modeIcon(row.transport_mode)} ${row.transport_mode}</td>
         <td class="py-1.5 pr-3 text-gray-400">${t}</td>
         <td class="py-1.5 text-right ${color} font-medium">${delay > 0 ? '+' : ''}${delay.toFixed(1)}m</td>
       </tr>`;
@@ -648,12 +649,40 @@ document.getElementById('from-time').addEventListener('change', () => {
   _fromTimer = setTimeout(loadUpcoming, 400);
 });
 
+function modeIcon(mode) {
+  return { BUS: '🚌', METRO: '🚇', TRAIN: '🚆', TRAM: '🚊', SHIP: '⛴', FERRY: '⛴' }[mode] ?? '🚐';
+}
+
 function delayBadge(delay, known) {
   const warn = (!known) ? ' title="Not in training data — estimate only"' : '';
   if (delay == null) return `<span class="text-gray-600">—</span>`;
-  if (delay < 0.5)  return `<span class="px-2 py-0.5 rounded-full bg-green-900 text-green-300 text-xs"${warn}>On time</span>`;
-  if (delay < 2)    return `<span class="px-2 py-0.5 rounded-full bg-amber-900 text-amber-300 text-xs"${warn}>+${delay.toFixed(1)} min</span>`;
-  return              `<span class="px-2 py-0.5 rounded-full bg-red-900 text-red-300 text-xs"${warn}>+${delay.toFixed(1)} min</span>`;
+  const secs = Math.round(Math.abs(delay) * 60);
+  const label = secs < 60 ? `~${secs}s` : `+${delay.toFixed(1)}m`;
+  if (delay < 0.5)  return `<span class="px-2 py-0.5 rounded-full bg-green-900/60 text-green-300 text-xs"${warn}>${label}</span>`;
+  if (delay < 2)    return `<span class="px-2 py-0.5 rounded-full bg-amber-900 text-amber-300 text-xs"${warn}>${label}</span>`;
+  return              `<span class="px-2 py-0.5 rounded-full bg-red-900 text-red-300 text-xs"${warn}>${label}</span>`;
+}
+
+function forecastChip(dep) {
+  const sched = new Date(dep.scheduled);
+  const hourSE = parseInt(sched.toLocaleString('en', { timeZone: 'Europe/Stockholm', hour: 'numeric', hour12: false }));
+  const daySE  = sched.toLocaleDateString('en', { timeZone: 'Europe/Stockholm', weekday: 'long' });
+  const isWeekend      = ['Saturday', 'Sunday'].includes(daySE);
+  const isMorningPeak  = hourSE >= 7  && hourSE <= 9;
+  const isEveningPeak  = hourSE >= 16 && hourSE <= 18;
+  const snow = _latestWeather.snowfall      ?? 0;
+  const wind = _latestWeather.wind_speed    ?? 0;
+  const rain = _latestWeather.precipitation ?? 0;
+  let label, cls;
+  if      (snow > 0)         { label = '❄ snow';    cls = 'text-blue-300'; }
+  else if (wind > 40)        { label = '💨 wind';   cls = 'text-yellow-300'; }
+  else if (rain > 2)         { label = '🌧 rain';   cls = 'text-blue-300'; }
+  else if (isMorningPeak)    { label = 'rush am';   cls = 'text-orange-300'; }
+  else if (isEveningPeak)    { label = 'rush pm';   cls = 'text-orange-300'; }
+  else if (isWeekend)        { label = 'weekend';   cls = 'text-gray-500'; }
+  else if (!dep.known_route) { label = 'new route'; cls = 'text-gray-500'; }
+  else                       { label = 'off-peak';  cls = 'text-gray-500'; }
+  return `<span class="text-xs ${cls} opacity-75">${label}</span>`;
 }
 
 // ── report generator ─────────────────────────────────────────────────────────
@@ -718,19 +747,30 @@ function generateReport(dep) {
   card.classList.remove('hidden');
 }
 
+let _upcomingDepartures = [];
+
 async function renderUpcoming(departures) {
+  _upcomingDepartures = departures;
   const tbody = document.getElementById('upcoming-tbody');
   tbody.innerHTML = '';
-  departures.forEach(dep => {
+  departures.forEach((dep, i) => {
     const t = new Date(dep.scheduled).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' });
     const name = dep.line_name || dep.line_id;
     const dest = dep.destination || '—';
-    tbody.innerHTML += `<tr class="delay-row">
+    tbody.innerHTML += `<tr class="delay-row cursor-pointer" data-idx="${i}">
       <td class="py-1.5 pr-3 text-white font-medium">${t}</td>
-      <td class="py-1.5 pr-3 text-white">${name}</td>
+      <td class="py-1.5 pr-3 text-white">${modeIcon(dep.transport_mode)} ${name}</td>
       <td class="py-1.5 pr-3 text-gray-400 truncate max-w-[100px] sm:max-w-[140px]" title="${dep.destination || ''}">${dest}</td>
-      <td class="py-1.5 text-right">${delayBadge(dep.delay_minutes, dep.known_route)}</td>
+      <td class="py-1.5 text-right">
+        <div class="flex flex-col items-end gap-0.5">
+          ${delayBadge(dep.delay_minutes, dep.known_route)}
+          ${forecastChip(dep)}
+        </div>
+      </td>
     </tr>`;
+  });
+  tbody.querySelectorAll('tr[data-idx]').forEach(tr => {
+    tr.addEventListener('click', () => generateReport(_upcomingDepartures[+tr.dataset.idx]));
   });
   document.getElementById('upcoming-table').classList.remove('hidden');
 }
