@@ -625,10 +625,25 @@ function setWindow(mins) {
   loadUpcoming();
 }
 
-// Leave from-time empty by default — empty means "now" and avoids all timezone
-// display issues. Only set it when Groq returns a specific future time.
+// Pre-fill from-time with the current local time so the field doesn't look blank.
+// The field advances every minute while the user hasn't manually edited it.
 let _fromTimer;
+let _fromUserEdited = false;
+
+function _setFromTimeToNow() {
+  const now = new Date();
+  // datetime-local requires "YYYY-MM-DDTHH:MM" in local time
+  const pad = n => String(n).padStart(2, '0');
+  const local = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  document.getElementById('from-time').value = local;
+}
+
+_setFromTimeToNow();
+// Keep the displayed time current while user hasn't touched it
+setInterval(() => { if (!_fromUserEdited) _setFromTimeToNow(); }, 60_000);
+
 document.getElementById('from-time').addEventListener('change', () => {
+  _fromUserEdited = true;
   clearTimeout(_fromTimer);
   _fromTimer = setTimeout(loadUpcoming, 400);
 });
@@ -913,19 +928,21 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
       document.getElementById('f-site').value = STATIONS[parsed.station];
     }
 
-    // Set from-time if Groq gave a specific future time; otherwise clear it so
-    // a stale time from a previous query doesn't pollute the new search.
+    // Set from-time if Groq gave a specific future time; otherwise reset to now.
     const fromField = document.getElementById('from-time');
     if (parsed.scheduled_iso) {
       const d = new Date(parsed.scheduled_iso);
       if (!isNaN(d) && d > new Date()) {
         d.setSeconds(0, 0);
         fromField.value = toLocalISO(d);
+        _fromUserEdited = true;
       } else {
-        fromField.value = '';
+        _setFromTimeToNow();
+        _fromUserEdited = false;
       }
     } else {
-      fromField.value = '';
+      _setFromTimeToNow();
+      _fromUserEdited = false;
     }
 
     // Apply window if Groq extracted one (e.g. "next hour" → 60)
