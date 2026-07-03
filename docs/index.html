@@ -903,13 +903,19 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
       document.getElementById('f-site').value = STATIONS[parsed.station];
     }
 
-    // Set from-time if Groq gave a specific time
+    // Set from-time if Groq gave a specific future time; otherwise clear it so
+    // a stale time from a previous query doesn't pollute the new search.
+    const fromField = document.getElementById('from-time');
     if (parsed.scheduled_iso) {
       const d = new Date(parsed.scheduled_iso);
-      if (!isNaN(d)) {
+      if (!isNaN(d) && d > new Date()) {
         d.setSeconds(0, 0);
-        document.getElementById('from-time').value = d.toISOString().slice(0, 16);
+        fromField.value = d.toISOString().slice(0, 16);
+      } else {
+        fromField.value = '';
       }
+    } else {
+      fromField.value = '';
     }
 
     // Set active line filter and reload departure board
