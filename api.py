@@ -422,12 +422,32 @@ async def get_upcoming(
         return {"departures": [], "error": "model not loaded"}
 
     try:
-        conn = _get_db()
+        # Fetch live departures from SL API so data is never stale
+        from transit.data_sources import _fetch_site_departures
+        sl_key = os.environ.get("TRAFIKLAB_API_KEY", "")
+        if not sl_key:
+            return {"departures": [], "error": "TRAFIKLAB_API_KEY not set"}
 
+        df = _fetch_site_departures(site_id, sl_key, forecast=window_minutes)
+        if df.empty:
+            return {"departures": [], "window_minutes": window_minutes, "site_id": site_id}
+
+        # Filter to future departures and optional line/mode
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        mask = df["scheduled"] >= now_utc
+        if line_id:
+            mask &= df["line_id"] == str(line_id)
+        if transport_mode:
+            mask &= df["transport_mode"] == transport_mode
+        df = df[mask].sort_values("scheduled").head(30)
+
+        # Latest weather from DB for predictions
+        conn = _get_db()
         wx = conn.execute(
             "SELECT temperature, wind_speed, precipitation, snowfall, cloud_cover "
             "FROM weather ORDER BY timestamp DESC LIMIT 1"
         ).df()
+        conn.close()
         temp = wind = precip = snow = cloud = None
         if not wx.empty:
             r = wx.iloc[0]
@@ -437,38 +457,6 @@ async def get_upcoming(
                 _f(r["snowfall"]), _f(r["cloud_cover"]),
             )
 
-        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-        end_utc = now_utc + timedelta(minutes=window_minutes)
-
-        extra_where = ""
-        params: list = [site_id, now_utc, end_utc]
-        if line_id:
-            extra_where += " AND line_id = ?"
-            params.append(line_id)
-        if transport_mode:
-            extra_where += " AND transport_mode = ?"
-            params.append(transport_mode)
-
-        df = conn.execute(f"""
-            SELECT site_id, line_id, line_name, transport_mode, destination, scheduled
-            FROM (
-                SELECT *,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY scheduled, line_id, transport_mode
-                        ORDER BY fetched_at DESC
-                    ) AS rn
-                FROM delays
-                WHERE site_id = ?
-                  AND scheduled > ?
-                  AND scheduled < ?
-                  {extra_where}
-            ) t
-            WHERE rn = 1
-            ORDER BY scheduled ASC
-            LIMIT 30
-        """, params).df()
-        conn.close()
-
         if df.empty:
             return {"departures": [], "window_minutes": window_minutes, "site_id": site_id}
 
@@ -477,6 +465,7 @@ async def get_upcoming(
 
         departures = []
         for _, row in df.iterrows():
+            # scheduled stored as UTC-naive from _fetch_site_departures
             sched_utc = pd.Timestamp(row["scheduled"]).tz_localize("UTC")
             try:
                 X = _build_row(
@@ -495,9 +484,9 @@ async def get_upcoming(
             departures.append({
                 "scheduled":      sched_utc.isoformat(),
                 "line_id":        str(row["line_id"]),
-                "line_name":      str(row["line_name"]),
+                "line_name":      str(row.get("line_name", row["line_id"])),
                 "transport_mode": str(row["transport_mode"]),
-                "destination":    str(row["destination"]),
+                "destination":    str(row.get("destination", "")),
                 "delay_minutes":  pred,
                 "known_route":    (
                     str(row["line_id"]) in line_id_map
