@@ -12,7 +12,7 @@ GET  /delays        Recent delays (last 50 rows)
 GET  /weather       Recent weather (last 24 hours)
 POST /predict       Single-stop delay prediction
 POST /retrain       Trigger champion/challenger retrain subprocess
-POST /groq/parse    NL journey description → structured fields (proxies Groq)
+GET  /config        Public runtime config (Groq key for client-side NL parsing)
 """
 from __future__ import annotations
 
@@ -20,11 +20,9 @@ import json
 import logging
 import os
 import pickle
-import re
 import subprocess
 import sys
 import time
-import urllib.request as _urllib_req
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -397,69 +395,16 @@ async def retrain():
         return {"status": "error", "error": str(exc)}
 
 
-_GROQ_SYSTEM = (
-    'You are a Stockholm transit query parser. Extract fields from a natural-language '
-    'journey description. Return ONLY valid JSON with these keys: '
-    '"station" (one of "T-Centralen", "Slussen", "Fridhemsplan", "Gullmarsplan", '
-    '"Odenplan", "Liljeholmen" — closest match or null), '
-    '"line_id" (string digits only e.g. "65", or null), '
-    '"transport_mode" (one of "BUS","METRO","TRAIN","TRAM","FERRY" or null), '
-    '"scheduled_iso" (ISO 8601 datetime or null; interpret relative dates from today). '
-    'If a field cannot be inferred return null. No explanation, only JSON.'
-)
-
-
-class ParseRequest(BaseModel):
-    text: str
-    today: str = ""     # caller passes today's date so the model can resolve "tomorrow"
-
-
-@app.post("/groq/parse")
-async def groq_parse(req: ParseRequest):
+@app.get("/config")
+async def get_config():
     """
-    Proxy a natural-language journey description to Groq and return structured fields.
+    Return public runtime config for the dashboard.
 
-    Requires GROQ_API_KEY environment variable. Called exclusively by the dashboard
-    so the API key is never exposed in client-side code.
+    The Groq key is served here so the browser can call Groq directly,
+    avoiding Cloudflare datacenter blocks that affect server-side calls.
+    The key is stored as a Container App env var — never committed to git.
     """
-    key = os.environ.get("GROQ_API_KEY", "")
-    if not key:
-        return {"error": "GROQ_API_KEY not configured on server"}
-
-    today_hint = f" Today is {req.today}." if req.today else ""
-    system = _GROQ_SYSTEM + today_hint
-
-    payload = json.dumps({
-        "model": "llama-3.1-8b-instant",
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user",   "content": req.text},
-        ],
-        "temperature": 0,
-        "max_tokens": 150,
-    }).encode()
-
-    http_req = _urllib_req.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
-        method="POST",
-    )
-    try:
-        with _urllib_req.urlopen(http_req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        raw = data["choices"][0]["message"]["content"].strip()
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            m = re.search(r"\{[\s\S]*\}", raw)
-            parsed = json.loads(m.group(0)) if m else None
-        if parsed is None:
-            return {"error": "Groq returned unparseable response"}
-        return {"result": parsed}
-    except Exception as exc:
-        log.warning("groq/parse failed: %s", exc)
-        return {"error": str(exc)}
+    return {"groq_key": os.environ.get("GROQ_API_KEY", "")}
 
 
 if __name__ == "__main__":

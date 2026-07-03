@@ -12,27 +12,29 @@ The dashboard lets anyone check if their bus, metro or train will be on time. Ty
 
 ```
   GitHub Pages dashboard
-        │
-        │  /predict  /delays  /weather
-        │  /groq/parse (Groq proxy)
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Azure Container Apps                                        │
-│                                                              │
-│  ┌──────────────────┐    ┌──────────────────────────────┐   │
-│  │  FastAPI (8000)  │    │  Data Poller (every 15 min)  │   │
-│  │  /predict        │    │  SL Departures → DuckDB      │   │
-│  │  /delays         │    │  Open-Meteo Weather → DuckDB │   │
-│  │  /weather        │    └──────────────────────────────┘   │
-│  │  /retrain        │                                        │
-│  │  /groq/parse     │──────────────────── Groq API          │
-│  └──────────────────┘                                        │
-│           │                                                  │
-│    DuckDB (data/traffik.duckdb)                              │
+        │                               ┌─────────────────┐
+        │  /predict  /delays  /weather  │   Browser calls  │
+        │  /config (Groq key)           │   Groq directly  │
+        ▼                               │   (bypasses CDN  │
+┌─────────────────────────────────────┐ │    datacenter    │
+│  Azure Container Apps               │ │    block)        │
+│                                     │ └────────┬────────┘
+│  ┌──────────────────┐    ┌────────────────────┐│           │
+│  │  FastAPI (8000)  │    │  Data Poller        ││           │
+│  │  /predict        │    │  (every 15 min)     ││           │
+│  │  /delays         │    │  SL Departures →    ││           │
+│  │  /weather        │    │  DuckDB             ││           │
+│  │  /retrain        │    │  Open-Meteo →       ││           │
+│  │  /config         │    │  DuckDB             │           │
+│  └──────────────────┘    └─────────────────────┘           │
+│           │                                                 │
+│    DuckDB (data/traffik.duckdb)                             │
 └─────────────────────────────────────────────────────────────┘
-         │                        │
-   Trafiklab SL API          Open-Meteo API
-   (departures)              (weather)
+         │                        │              │
+   Trafiklab SL API          Open-Meteo API   Groq API
+   (departures)              (weather)        (NL parsing,
+                                               called from
+                                               browser)
 
 Registry: GitHub Container Registry (free)
 CI/CD: GitHub Actions → GHCR → Azure Container Apps
@@ -77,10 +79,8 @@ curl -X POST /predict \
     "scheduled": "2025-07-03T08:15:00Z"
   }'
 
-# Parse a natural-language journey description (proxied to Groq server-side)
-curl -X POST /groq/parse \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Bus 65 from Odenplan tomorrow at 8am", "today": "2025-07-02"}'
+# Get public config (Groq key for client-side NL parsing)
+curl /config
 
 # Recent delays
 curl /delays
@@ -104,7 +104,7 @@ curl -X POST /retrain
 | Container | Docker, GitHub Container Registry |
 | Hosting | Azure Container Apps (scale-to-zero, free tier) |
 | Dashboard | GitHub Pages, Tailwind CSS, Chart.js |
-| NL parsing | Groq (llama-3.1-8b-instant), server-side proxy |
+| NL parsing | Groq (llama-3.1-8b-instant), called directly from browser |
 | CI/CD | GitHub Actions |
 
 ## Project Structure

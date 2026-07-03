@@ -653,6 +653,26 @@ function groqRecord() {
   groqCallLog.push(Date.now());
 }
 
+// ── Groq key (fetched once from /config; never committed to git) ──────────────
+let _groqKey = '';
+async function loadConfig() {
+  try {
+    const r = await fetch(`${API}/config`);
+    const d = await r.json();
+    _groqKey = d.groq_key || '';
+  } catch (e) { console.warn('Could not load /config', e); }
+}
+
+const GROQ_SYSTEM =
+  'You are a Stockholm transit query parser. Extract fields from a natural-language ' +
+  'journey description. Return ONLY valid JSON with keys: ' +
+  '"station" (one of: T-Centralen, Slussen, Fridhemsplan, Gullmarsplan, Odenplan, ' +
+  'Liljeholmen — closest match or null), ' +
+  '"line_id" (string digits only e.g. "65", or null), ' +
+  '"transport_mode" (one of BUS METRO TRAIN TRAM FERRY or null), ' +
+  '"scheduled_iso" (ISO 8601 datetime or null; interpret relative dates from today). ' +
+  'If a field cannot be inferred return null. No explanation, only JSON.';
+
 // ── Groq NL parse ─────────────────────────────────────────────────────────────
 document.getElementById('nl-parse-btn').addEventListener('click', async () => {
   const text = document.getElementById('nl-input').value.trim();
@@ -661,6 +681,12 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
   const btn = document.getElementById('nl-parse-btn');
   const errEl = document.getElementById('nl-error');
   errEl.classList.add('hidden');
+
+  if (!_groqKey) {
+    errEl.textContent = 'Groq key not available — fill the form manually.';
+    errEl.classList.remove('hidden');
+    return;
+  }
 
   if (!groqAllowed()) {
     const remaining = Math.ceil((GROQ_WINDOW_MS - (Date.now() - groqCallLog[0])) / 60000);
@@ -674,17 +700,38 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
 
   try {
     groqRecord();
-    const r = await fetch(`${API}/groq/parse`, {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, today: new Date().toISOString().slice(0, 10) }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${_groqKey}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          { role: 'system', content: GROQ_SYSTEM + ` Today is ${today}.` },
+          { role: 'user',   content: text },
+        ],
+        temperature: 0,
+        max_tokens: 150,
+      }),
     });
 
-    if (!r.ok) throw new Error(`Server error ${r.status}`);
+    if (!r.ok) {
+      const body = await r.text();
+      throw new Error(`Groq error ${r.status}: ${body.slice(0, 120)}`);
+    }
 
     const data = await r.json();
-    if (data.error) throw new Error(data.error);
-    const parsed = data.result;
+    const raw = data.choices?.[0]?.message?.content?.trim() || '';
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const m = raw.match(/\{[\s\S]*\}/);
+      parsed = m ? JSON.parse(m[0]) : null;
+    }
     if (!parsed) throw new Error('Could not understand — please fill the form manually.');
 
     // Fill form fields
@@ -719,7 +766,7 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
 // ── init ─────────────────────────────────────────────────────────────────────
 (async () => {
   await checkHealth();
-  await Promise.all([loadModelInfo(), loadDelays(), loadWeather()]);
+  await Promise.all([loadConfig(), loadModelInfo(), loadDelays(), loadWeather()]);
   setInterval(loadDelays, 60000);
   setInterval(loadWeather, 300000);
   setInterval(checkHealth, 30000);
