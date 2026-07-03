@@ -21,8 +21,6 @@ env
 tests/
 *.log
 
-# Local data and model files (mounted or downloaded at runtime)
-data/
 mlflow.db
 mlruns/
 
