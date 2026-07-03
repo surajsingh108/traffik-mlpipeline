@@ -143,6 +143,8 @@
               <option value="9192">Gullmarsplan</option>
               <option value="9261" selected>Odenplan</option>
               <option value="9530">Liljeholmen</option>
+              <option value="9306">Solna centrum</option>
+              <option value="9325">Sundbyberg</option>
             </select>
           </div>
           <div>
@@ -357,12 +359,14 @@
 const API = 'https://traffik-api.ambitiousflower-45d3cfc8.swedencentral.azurecontainerapps.io';
 
 const STATIONS = {
-  'T-Centralen':  9001,
-  'Slussen':      9180,
-  'Fridhemsplan': 9117,
-  'Gullmarsplan': 9192,
-  'Odenplan':     9261,
-  'Liljeholmen':  9530,
+  'T-Centralen':   9001,
+  'Slussen':       9180,
+  'Fridhemsplan':  9117,
+  'Gullmarsplan':  9192,
+  'Odenplan':      9261,
+  'Liljeholmen':   9530,
+  'Solna centrum': 9306,
+  'Sundbyberg':    9325,
 };
 
 let delayChart = null;
@@ -674,7 +678,7 @@ const GROQ_SYSTEM =
   'You are a Stockholm transit query parser. Extract fields from a natural-language ' +
   'journey description. Return ONLY valid JSON with keys: ' +
   '"station" (one of: T-Centralen, Slussen, Fridhemsplan, Gullmarsplan, Odenplan, ' +
-  'Liljeholmen — closest match or null), ' +
+  'Liljeholmen, Solna centrum, Sundbyberg — closest match or null), ' +
   '"line_id" (string digits only e.g. "65", or null), ' +
   '"transport_mode" (one of BUS METRO TRAIN TRAM FERRY or null), ' +
   '"scheduled_iso" (ISO 8601 datetime or null; interpret relative dates from today). ' +

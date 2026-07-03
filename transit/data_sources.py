@@ -47,6 +47,8 @@ DEFAULT_SITE_IDS: list[int] = [
     9192,   # Gullmarsplan
     9261,   # Odenplan
     9530,   # Liljeholmen
+    9306,   # Solna centrum
+    9325,   # Sundbyberg
 ]
 
 
