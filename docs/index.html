@@ -149,6 +149,17 @@
           <option value="9325">Sundbyberg</option>
         </select>
 
+        <!-- Time + window controls -->
+        <div class="flex gap-2 items-center">
+          <input id="from-time" type="datetime-local"
+            class="flex-1 bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" />
+          <div class="flex rounded-lg border border-white/10 overflow-hidden text-xs">
+            <button onclick="setWindow(30)"  id="win-30"  class="px-2 py-2 bg-blue-700 text-white">30m</button>
+            <button onclick="setWindow(60)"  id="win-60"  class="px-2 py-2 bg-gray-900 text-gray-400 hover:bg-gray-800">1h</button>
+            <button onclick="setWindow(120)" id="win-120" class="px-2 py-2 bg-gray-900 text-gray-400 hover:bg-gray-800">2h</button>
+          </div>
+        </div>
+
         <!-- Active line filter (set by Parse) -->
         <div id="filter-chip" class="hidden items-center gap-2">
           <span class="text-xs text-gray-400">Filtered:</span>
@@ -160,8 +171,19 @@
 
         <!-- States -->
         <p id="upcoming-loading" class="text-xs text-gray-500 text-center py-6">Loading departures…</p>
-        <p id="upcoming-empty" class="hidden text-xs text-gray-500 text-center py-6">No departures in the next 30 min.<br>Data refreshes every 15 min.</p>
+        <p id="upcoming-empty" class="hidden text-xs text-gray-500 text-center py-6"></p>
         <p id="upcoming-error" class="hidden text-xs text-red-400 text-center py-6"></p>
+
+        <!-- Report card (shown when filter active) -->
+        <div id="report-card" class="hidden rounded-lg bg-gray-900 border border-white/10 p-4 space-y-2">
+          <div class="flex justify-between items-baseline">
+            <p id="report-line" class="text-sm font-semibold text-white"></p>
+            <p id="report-time" class="text-xs text-gray-400"></p>
+          </div>
+          <p id="report-verdict" class="text-sm font-bold"></p>
+          <ul id="report-factors" class="text-xs text-gray-400 space-y-1"></ul>
+          <p class="text-xs text-gray-600 pt-2 border-t border-white/5">Incidents and construction not tracked — check SL.se for live alerts.</p>
+        </div>
 
         <!-- Departure table -->
         <div class="overflow-auto">
@@ -547,6 +569,13 @@ async function loadWeather() {
     const r = await fetch(url);
     const d = await r.json();
     const c = d.current;
+    _latestWeather = {
+      temperature:   c.temperature_2m,
+      wind_speed:    c.wind_speed_10m,
+      precipitation: c.precipitation,
+      snowfall:      c.snowfall,
+      cloud_cover:   c.cloud_cover,
+    };
     const fmt = v => v != null ? v.toFixed(1) : '—';
     document.getElementById('w-temp').textContent = fmt(c.temperature_2m);
     document.getElementById('w-wind').textContent = fmt(c.wind_speed_10m);
@@ -570,7 +599,32 @@ async function loadWeather() {
 }
 
 // ── upcoming departure board ──────────────────────────────────────────────────
-let activeFilter = null; // {line_id, transport_mode, label}
+let activeFilter = null;
+let windowMinutes = 30;
+
+function setWindow(mins) {
+  windowMinutes = mins;
+  [30, 60, 120].forEach(m => {
+    const btn = document.getElementById(`win-${m}`);
+    btn.className = m === mins
+      ? 'px-2 py-2 bg-blue-700 text-white'
+      : 'px-2 py-2 bg-gray-900 text-gray-400 hover:bg-gray-800';
+  });
+  loadUpcoming();
+}
+
+// Init from-time to now, update on focus if blank/past
+function resetFromTime() {
+  const f = document.getElementById('from-time');
+  const cur = f.value ? new Date(f.value) : null;
+  if (!cur || cur <= new Date()) {
+    const dt = new Date();
+    dt.setSeconds(0, 0);
+    f.value = dt.toISOString().slice(0, 16);
+  }
+}
+resetFromTime();
+document.getElementById('from-time').addEventListener('change', loadUpcoming);
 
 function delayBadge(delay, known) {
   const warn = (!known) ? ' title="Not in training data — estimate only"' : '';
@@ -578,6 +632,68 @@ function delayBadge(delay, known) {
   if (delay < 0.5)  return `<span class="px-2 py-0.5 rounded-full bg-green-900 text-green-300 text-xs"${warn}>On time</span>`;
   if (delay < 2)    return `<span class="px-2 py-0.5 rounded-full bg-amber-900 text-amber-300 text-xs"${warn}>+${delay.toFixed(1)} min</span>`;
   return              `<span class="px-2 py-0.5 rounded-full bg-red-900 text-red-300 text-xs"${warn}>+${delay.toFixed(1)} min</span>`;
+}
+
+// ── report generator ─────────────────────────────────────────────────────────
+let _latestWeather = {};
+
+function generateReport(dep) {
+  const card = document.getElementById('report-card');
+  if (!dep) { card.classList.add('hidden'); return; }
+
+  const delay   = dep.delay_minutes ?? 0;
+  const sched   = new Date(dep.scheduled);
+  const hourSE  = parseInt(sched.toLocaleString('en', { timeZone: 'Europe/Stockholm', hour: 'numeric', hour12: false }));
+  const daySE   = sched.toLocaleDateString('en', { timeZone: 'Europe/Stockholm', weekday: 'long' });
+  const isWeekend     = ['Saturday', 'Sunday'].includes(daySE);
+  const isMorningPeak = hourSE >= 7  && hourSE <= 9;
+  const isEveningPeak = hourSE >= 16 && hourSE <= 18;
+
+  const snow  = _latestWeather.snowfall      ?? 0;
+  const wind  = _latestWeather.wind_speed    ?? 0;
+  const rain  = _latestWeather.precipitation ?? 0;
+  const temp  = _latestWeather.temperature;
+
+  const factors = [];
+
+  // Time
+  if      (isMorningPeak) factors.push('Morning rush hour (07:00–09:00) — higher congestion expected');
+  else if (isEveningPeak) factors.push('Evening rush hour (16:00–18:00) — higher congestion expected');
+  else if (isWeekend)     factors.push('Weekend schedule — lighter traffic');
+  else                    factors.push('Off-peak hours — normal traffic conditions');
+
+  // Weather
+  const weatherExplainDelay = snow > 0 || wind > 40 || rain > 2;
+  if      (snow > 0)   factors.push(`Snowfall detected (${snow.toFixed(1)} mm) — surface routes affected`);
+  else if (wind > 40)  factors.push(`High wind (${wind.toFixed(0)} km/h) — ferry and tram services may be affected`);
+  else if (rain > 2)   factors.push(`Heavy rain (${rain.toFixed(1)} mm) — allow extra time for surface routes`);
+  else                 factors.push(`Weather clear${temp != null ? ' · ' + temp.toFixed(0) + ' °C' : ''} — no weather impact`);
+
+  // Known route
+  if (!dep.known_route) factors.push('Route not in training data — prediction is an estimate');
+
+  // If delay present but nothing explains it
+  if (delay >= 0.5 && !weatherExplainDelay && !isMorningPeak && !isEveningPeak) {
+    factors.push('No weather or time-of-day cause detected — may be a construction or service disruption');
+  }
+
+  // Verdict
+  const timeStr      = sched.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' });
+  const minutesUntil = Math.round((sched - new Date()) / 60000);
+  const modeLabel    = dep.transport_mode.charAt(0) + dep.transport_mode.slice(1).toLowerCase();
+  const dest         = dep.destination ? ` → ${dep.destination}` : '';
+
+  let verdict, color;
+  if      (delay < 0.5) { verdict = 'Expected on time';                         color = 'text-green-400'; }
+  else if (delay < 2)   { verdict = `Minor delay — ~${delay.toFixed(1)} min late`; color = 'text-amber-400'; }
+  else                  { verdict = `Significant delay — ~${delay.toFixed(1)} min late`; color = 'text-red-400'; }
+
+  document.getElementById('report-line').textContent    = `${modeLabel} ${dep.line_id}${dest}`;
+  document.getElementById('report-time').textContent    = `Next: ${timeStr}${minutesUntil > 0 ? ` (in ${minutesUntil} min)` : ''}`;
+  document.getElementById('report-verdict').textContent = verdict;
+  document.getElementById('report-verdict').className   = `text-sm font-bold ${color}`;
+  document.getElementById('report-factors').innerHTML   = factors.map(f => `<li>· ${f}</li>`).join('');
+  card.classList.remove('hidden');
 }
 
 async function renderUpcoming(departures) {
@@ -611,7 +727,10 @@ async function loadUpcoming() {
   tbl.classList.add('hidden');
 
   try {
-    let url = `${API}/upcoming?site_id=${siteId}&window_minutes=30`;
+    const fromVal = document.getElementById('from-time').value;
+    const fromISO = fromVal ? new Date(fromVal).toISOString() : '';
+    let url = `${API}/upcoming?site_id=${siteId}&window_minutes=${windowMinutes}`;
+    if (fromISO) url += `&from_time=${encodeURIComponent(fromISO)}`;
     if (activeFilter?.line_id)        url += `&line_id=${encodeURIComponent(activeFilter.line_id)}`;
     if (activeFilter?.transport_mode) url += `&transport_mode=${encodeURIComponent(activeFilter.transport_mode)}`;
 
@@ -645,6 +764,9 @@ async function loadUpcoming() {
     }
 
     await renderUpcoming(d.departures);
+    // Show report for first departure only when a line filter is active
+    if (activeFilter?.line_id) generateReport(d.departures[0]);
+    else document.getElementById('report-card').classList.add('hidden');
   } catch (e) {
     loadEl.classList.add('hidden');
     errEl.textContent = 'Could not load departures.';
@@ -655,6 +777,7 @@ async function loadUpcoming() {
 function clearFilter() {
   activeFilter = null;
   document.getElementById('filter-chip').classList.add('hidden');
+  document.getElementById('report-card').classList.add('hidden');
   loadUpcoming();
 }
 
@@ -764,6 +887,15 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
     // Set station dropdown
     if (parsed.station && STATIONS[parsed.station]) {
       document.getElementById('f-site').value = STATIONS[parsed.station];
+    }
+
+    // Set from-time if Groq gave a specific time
+    if (parsed.scheduled_iso) {
+      const d = new Date(parsed.scheduled_iso);
+      if (!isNaN(d)) {
+        d.setSeconds(0, 0);
+        document.getElementById('from-time').value = d.toISOString().slice(0, 16);
+      }
     }
 
     // Set active line filter and reload departure board

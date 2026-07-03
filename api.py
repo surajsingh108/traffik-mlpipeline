@@ -410,6 +410,7 @@ async def get_upcoming(
     window_minutes: int = 30,
     line_id: str | None = None,
     transport_mode: str | None = None,
+    from_time: str | None = None,   # ISO 8601 UTC; defaults to now
 ):
     """
     Return upcoming departures at a station with model delay predictions.
@@ -428,13 +429,27 @@ async def get_upcoming(
         if not sl_key:
             return {"departures": [], "error": "TRAFIKLAB_API_KEY not set"}
 
-        df = _fetch_site_departures(site_id, sl_key, forecast=window_minutes)
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Determine window start and how far ahead to ask SL for
+        if from_time:
+            try:
+                start = datetime.fromisoformat(from_time.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                start = now_utc
+        else:
+            start = now_utc
+
+        minutes_until_start = max(0, int((start - now_utc).total_seconds() / 60))
+        forecast = minutes_until_start + window_minutes + 5   # +5 min buffer
+
+        df = _fetch_site_departures(site_id, sl_key, forecast=forecast)
         if df.empty:
             return {"departures": [], "window_minutes": window_minutes, "site_id": site_id}
 
-        # Filter to future departures and optional line/mode
-        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-        mask = df["scheduled"] >= now_utc
+        # Filter to [start, start + window_minutes] and optional line/mode
+        end = start + timedelta(minutes=window_minutes)
+        mask = (df["scheduled"] >= start) & (df["scheduled"] <= end)
         if line_id:
             mask &= df["line_id"] == str(line_id)
         if transport_mode:
