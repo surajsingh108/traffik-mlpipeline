@@ -226,15 +226,25 @@ def train(con, force: bool = False) -> dict:
     log.info("Promotion decision: %s → %s", "PROMOTED" if promoted else "REJECTED", reason)
 
     if promoted:
-        config = {
-            "feature_cols":        feat_cols,
-            "transport_mode_map":  TRANSPORT_MODE_MAP,
-            "line_id_map":         LINE_ID_MAP,
-            "site_id_map":         {str(k): v for k, v in SITE_ID_MAP.items()},
-            "lgbm_params":         _LGBM_PARAMS,
-            "holdout_days":        HOLDOUT_DAYS,
-        }
-        save_champion(model, metrics, config)
+        if not TRANSPORT_MODE_MAP or not LINE_ID_MAP or not SITE_ID_MAP:
+            log.warning(
+                "Skipping champion save — encoding maps are empty "
+                "(TRANSPORT_MODE_MAP=%d, LINE_ID_MAP=%d, SITE_ID_MAP=%d). "
+                "Re-run build_features(fit=True) against a populated DB.",
+                len(TRANSPORT_MODE_MAP), len(LINE_ID_MAP), len(SITE_ID_MAP),
+            )
+            promoted = False
+            reason = "encoding maps empty — champion not saved"
+        else:
+            config = {
+                "feature_cols":        feat_cols,
+                "transport_mode_map":  TRANSPORT_MODE_MAP,
+                "line_id_map":         LINE_ID_MAP,
+                "site_id_map":         {str(k): v for k, v in SITE_ID_MAP.items()},
+                "lgbm_params":         _LGBM_PARAMS,
+                "holdout_days":        HOLDOUT_DAYS,
+            }
+            save_champion(model, metrics, config)
 
     return {
         "metrics":      metrics,

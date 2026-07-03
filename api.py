@@ -31,7 +31,7 @@ import holidays
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -229,7 +229,7 @@ async def get_delays():
             SELECT fetched_at, site_id, line_id, line_name,
                    transport_mode, scheduled, expected, delay_minutes
             FROM delays
-            ORDER BY scheduled DESC
+            ORDER BY fetched_at DESC
             LIMIT 50
         """).df()
         conn.close()
@@ -407,7 +407,7 @@ async def retrain():
 @app.get("/upcoming")
 async def get_upcoming(
     site_id: int,
-    window_minutes: int = 30,
+    window_minutes: int = Query(default=30, ge=1, le=240),
     line_id: str | None = None,
     transport_mode: str | None = None,
     from_time: str | None = None,   # ISO 8601 UTC; defaults to now
@@ -436,7 +436,7 @@ async def get_upcoming(
             try:
                 start = datetime.fromisoformat(from_time.replace("Z", "+00:00")).replace(tzinfo=None)
             except ValueError:
-                start = now_utc
+                raise HTTPException(status_code=422, detail="from_time must be ISO 8601 (e.g. 2026-07-03T18:00:00Z)")
         else:
             start = now_utc
 

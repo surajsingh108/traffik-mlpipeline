@@ -140,25 +140,26 @@
         <!-- Station selector -->
         <select id="f-site" class="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
           <option value="9001">T-Centralen</option>
-          <option value="9180">Slussen</option>
-          <option value="9117">Fridhemsplan</option>
-          <option value="9192">Gullmarsplan</option>
-          <option value="9261" selected>Odenplan</option>
-          <option value="9530">Liljeholmen</option>
-          <option value="9306">Solna centrum</option>
+          <option value="9192">Slussen</option>
+          <option value="9115">Fridhemsplan</option>
+          <option value="9189">Gullmarsplan</option>
+          <option value="9117" selected>Odenplan</option>
+          <option value="9294">Liljeholmen</option>
+          <option value="9305">Solna centrum</option>
           <option value="9325">Sundbyberg</option>
         </select>
 
         <!-- Time + window controls -->
-        <div class="flex gap-2 items-center">
-          <input id="from-time" type="datetime-local"
-            class="flex-1 bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" />
-          <div class="flex rounded-lg border border-white/10 overflow-hidden text-xs">
+        <div class="flex flex-wrap gap-2 items-center">
+          <input id="from-time" type="datetime-local" placeholder="now"
+            class="flex-1 min-w-0 bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" />
+          <div class="flex shrink-0 rounded-lg border border-white/10 overflow-hidden text-xs">
             <button onclick="setWindow(30)"  id="win-30"  class="px-2 py-2 bg-blue-700 text-white">30m</button>
             <button onclick="setWindow(60)"  id="win-60"  class="px-2 py-2 bg-gray-900 text-gray-400 hover:bg-gray-800">1h</button>
             <button onclick="setWindow(120)" id="win-120" class="px-2 py-2 bg-gray-900 text-gray-400 hover:bg-gray-800">2h</button>
           </div>
         </div>
+        <span id="from-time-note" class="hidden text-xs text-gray-500 -mt-1">Time passed — reset to now</span>
 
         <!-- Active line filter (set by Parse) -->
         <div id="filter-chip" class="hidden items-center gap-2">
@@ -204,8 +205,9 @@
       <!-- Network status -->
       <div class="lg:col-span-2 glass rounded-xl p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Live Network Status</h2>
+          <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Recent Delays</h2>
           <span id="delay-count" class="text-xs text-gray-500"></span>
+          <span id="delays-age" class="text-xs text-gray-600 ml-2"></span>
         </div>
         <p id="delay-staleness" class="text-xs text-yellow-500 mb-3 hidden"></p>
 
@@ -242,14 +244,14 @@
     <!-- Stat cards -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
       <div class="stat-card glass rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider">Avg error</p>
+        <p class="text-xs text-gray-400 uppercase tracking-wider">Typical accuracy</p>
         <p class="text-2xl font-bold text-white mt-1" id="stat-mae">—</p>
-        <p class="text-xs text-gray-500 mt-1">minutes</p>
+        <p class="text-xs text-gray-500 mt-1">avg error in seconds</p>
       </div>
       <div class="stat-card glass rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider">Typical error</p>
+        <p class="text-xs text-gray-400 uppercase tracking-wider">Worst-case error</p>
         <p class="text-2xl font-bold text-white mt-1" id="stat-rmse">—</p>
-        <p class="text-xs text-gray-500 mt-1">minutes</p>
+        <p class="text-xs text-gray-500 mt-1">± seconds</p>
       </div>
       <div class="stat-card glass rounded-xl p-4">
         <p class="text-xs text-gray-400 uppercase tracking-wider">Training trips</p>
@@ -373,12 +375,12 @@ const API = 'https://traffik-api.ambitiousflower-45d3cfc8.swedencentral.azurecon
 
 const STATIONS = {
   'T-Centralen':   9001,
-  'Slussen':       9180,
-  'Fridhemsplan':  9117,
-  'Gullmarsplan':  9192,
-  'Odenplan':      9261,
-  'Liljeholmen':   9530,
-  'Solna centrum': 9306,
+  'Slussen':       9192,
+  'Fridhemsplan':  9115,
+  'Gullmarsplan':  9189,
+  'Odenplan':      9117,
+  'Liljeholmen':   9294,
+  'Solna centrum': 9305,
   'Sundbyberg':    9325,
 };
 
@@ -415,14 +417,16 @@ async function loadModelInfo() {
     const r = await fetch(`${API}/model/info`);
     const d = await r.json();
     if (d.metrics) {
-      const mae = d.metrics.test_mae;
-      document.getElementById('stat-mae').textContent = mae.toFixed(3);
-      document.getElementById('stat-rmse').textContent = d.metrics.test_rmse.toFixed(3);
-      document.getElementById('stat-train').textContent = d.metrics.n_train.toLocaleString();
+      const mae  = d.metrics.test_mae;
+      const rmse = d.metrics.test_rmse;
+      const maeSecs  = Math.round(mae  * 60);
+      const rmseSecs = Math.round(rmse * 60);
+      document.getElementById('stat-mae').textContent  = `~${maeSecs}s`;
+      document.getElementById('stat-rmse').textContent = `±${rmseSecs}s`;
+      document.getElementById('stat-train').textContent    = d.metrics.n_train.toLocaleString();
       document.getElementById('stat-features').textContent = d.metrics.n_features;
-      const secs = Math.round(mae * 60);
       document.getElementById('stat-note').textContent =
-        `Avg error ${mae.toFixed(3)} min = ~${secs} second${secs !== 1 ? 's' : ''} — well within SL's 1-minute reporting threshold.`;
+        `Model predicts within ~${maeSecs} second${maeSecs !== 1 ? 's' : ''} on average — well within SL's 1-minute reporting threshold.`;
     }
   } catch (e) { console.error('model/info', e); }
 }
@@ -468,7 +472,6 @@ function fillFromTicker(el) {
   const lineId = el.dataset.line;
   const mode = el.dataset.mode;
   document.getElementById('f-site').value = siteId;
-  document.getElementById('f-site').value = siteId;
   activeFilter = { line_id: lineId, transport_mode: mode };
   document.getElementById('filter-label').textContent = `${mode.charAt(0)+mode.slice(1).toLowerCase()} ${lineId}`;
   document.getElementById('filter-chip').classList.remove('hidden');
@@ -486,9 +489,11 @@ async function loadDelays() {
 
     document.getElementById('delay-count').textContent = `${d.delays.length} departures`;
 
-    // Staleness warning
-    const newest = new Date(d.delays[d.delays.length - 1].fetched_at);
+    // Age badge and staleness warning
+    const newest = new Date(d.delays[0]?.fetched_at + 'Z');
     const ageMin = Math.round((Date.now() - newest.getTime()) / 60000);
+    const ageEl = document.getElementById('delays-age');
+    ageEl.textContent = ageMin < 2 ? '· just now' : `· ${ageMin}m ago`;
     const staleEl = document.getElementById('delay-staleness');
     if (ageMin > 30) {
       staleEl.textContent = `Data fetched ${ageMin} minutes ago — pipeline may not be running`;
@@ -508,8 +513,8 @@ async function loadDelays() {
     });
     const modeEl = document.getElementById('mode-summary');
     modeEl.innerHTML = Object.entries(modeAvg).map(([m, avg]) => {
-      const color = avg > 1 ? 'bg-red-950 text-red-300 border-red-800'
-                  : avg > 0 ? 'bg-amber-950 text-amber-300 border-amber-800'
+      const color = avg >= 2   ? 'bg-red-950 text-red-300 border-red-800'
+                  : avg >= 0.5 ? 'bg-amber-950 text-amber-300 border-amber-800'
                   : 'bg-gray-900 text-gray-400 border-white/10';
       return `<span class="text-xs px-3 py-1 rounded-full border ${color}">${m} ${avg.toFixed(1)} min</span>`;
     }).join('');
@@ -622,7 +627,11 @@ function setWindow(mins) {
 
 // Leave from-time empty by default — empty means "now" and avoids all timezone
 // display issues. Only set it when Groq returns a specific future time.
-document.getElementById('from-time').addEventListener('change', loadUpcoming);
+let _fromTimer;
+document.getElementById('from-time').addEventListener('change', () => {
+  clearTimeout(_fromTimer);
+  _fromTimer = setTimeout(loadUpcoming, 400);
+});
 
 function delayBadge(delay, known) {
   const warn = (!known) ? ' title="Not in training data — estimate only"' : '';
@@ -704,7 +713,7 @@ async function renderUpcoming(departures) {
     tbody.innerHTML += `<tr class="delay-row">
       <td class="py-1.5 pr-3 text-white font-medium">${t}</td>
       <td class="py-1.5 pr-3 text-white">${name}</td>
-      <td class="py-1.5 pr-3 text-gray-400 truncate max-w-[80px]">${dest}</td>
+      <td class="py-1.5 pr-3 text-gray-400 truncate max-w-[100px] sm:max-w-[140px]" title="${dep.destination || ''}">${dest}</td>
       <td class="py-1.5 text-right">${delayBadge(dep.delay_minutes, dep.known_route)}</td>
     </tr>`;
   });
@@ -723,8 +732,13 @@ async function loadUpcoming(allowAutoSwitch = true) {
   // Avoids timezone display issues; the API defaults to current time when
   // from_time is omitted.
   const fromField = document.getElementById('from-time');
+  const fromNote  = document.getElementById('from-time-note');
   if (fromField.value && new Date(fromField.value) < new Date()) {
     fromField.value = '';
+    fromNote.classList.remove('hidden');
+    setTimeout(() => fromNote.classList.add('hidden'), 3000);
+  } else {
+    fromNote.classList.add('hidden');
   }
 
   loadEl.classList.remove('hidden');
@@ -756,21 +770,25 @@ async function loadUpcoming(allowAutoSwitch = true) {
       // allowAutoSwitch=false on the recursive call prevents an infinite loop when
       // the line has no departures at any monitored station in this window.
       if (activeFilter?.line_id && allowAutoSwitch) {
-        let whereUrl = `${API}/where?line_id=${encodeURIComponent(activeFilter.line_id)}`;
-        if (activeFilter.transport_mode) whereUrl += `&transport_mode=${encodeURIComponent(activeFilter.transport_mode)}`;
-        const wr = await fetch(whereUrl);
-        const wd = await wr.json();
-        const altSite = (wd.site_ids || []).find(id => String(id) !== String(siteId));
-        if (altSite) {
-          siteEl.value = String(altSite);
-          const stationName = siteEl.selectedOptions[0]?.text || altSite;
-          emptyEl.textContent = `Switched to ${stationName} — that's where ${activeFilter.line_id} runs.`;
-          emptyEl.classList.remove('hidden');
-          await loadUpcoming(false);
-          return;
-        }
+        try {
+          let whereUrl = `${API}/where?line_id=${encodeURIComponent(activeFilter.line_id)}`;
+          if (activeFilter.transport_mode) whereUrl += `&transport_mode=${encodeURIComponent(activeFilter.transport_mode)}`;
+          const wr = await fetch(whereUrl);
+          const wd = await wr.json();
+          const altSite = (wd.site_ids || []).find(id => String(id) !== String(siteId));
+          if (altSite) {
+            siteEl.value = String(altSite);
+            const stationName = siteEl.selectedOptions[0]?.text || altSite;
+            emptyEl.textContent = `Switched to ${stationName} — that's where ${activeFilter.line_id} runs.`;
+            emptyEl.classList.remove('hidden');
+            await loadUpcoming(false);
+            return;
+          }
+        } catch (_) { /* auto-switch failed — fall through to empty state */ }
       }
-      emptyEl.textContent = `No departures in the next ${windowMinutes} min. Data refreshes every 15 min.`;
+      emptyEl.innerHTML = windowMinutes < 60
+        ? `No departures found in this window. <button onclick="setWindow(60)" class="underline text-blue-400 hover:text-blue-300">Try 1h view →</button>`
+        : `No departures found in this window.`;
       emptyEl.classList.remove('hidden');
       document.getElementById('report-card').classList.add('hidden');
       return;
@@ -797,6 +815,7 @@ function clearFilter() {
 document.getElementById('f-site').addEventListener('change', () => {
   activeFilter = null;
   document.getElementById('filter-chip').classList.add('hidden');
+  document.getElementById('report-card').classList.add('hidden');
   loadUpcoming();
 });
 
@@ -923,10 +942,11 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
       parsed.line_id,
     ].filter(Boolean).join(' ');
 
-    activeFilter = {
+    const newFilter = {
       line_id:        parsed.line_id        || null,
       transport_mode: parsed.transport_mode || null,
     };
+    activeFilter = (newFilter.line_id || newFilter.transport_mode) ? newFilter : null;
 
     // Clear stale report from previous query immediately
     document.getElementById('report-card').classList.add('hidden');

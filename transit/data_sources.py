@@ -26,6 +26,7 @@ import logging
 import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Sequence
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -42,12 +43,12 @@ SL_BASE_URL = "https://transport.integration.sl.se/v1"
 # Add more with: GET /v1/sites?expand=false&q=<name>
 DEFAULT_SITE_IDS: list[int] = [
     9001,   # T-Centralen (metro hub)
-    9180,   # Slussen
-    9117,   # Fridhemsplan
-    9192,   # Gullmarsplan
-    9261,   # Odenplan
-    9530,   # Liljeholmen
-    9306,   # Solna centrum
+    9192,   # Slussen
+    9115,   # Fridhemsplan
+    9189,   # Gullmarsplan
+    9117,   # Odenplan
+    9294,   # Liljeholmen
+    9305,   # Solna centrum
     9325,   # Sundbyberg
 ]
 
@@ -80,7 +81,8 @@ def _parse_iso(ts_str: str | None) -> datetime | None:
     try:
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            # SL Departures v1 returns naive local Stockholm time (no offset)
+            dt = dt.replace(tzinfo=ZoneInfo("Europe/Stockholm"))
         return dt
     except ValueError:
         return None
