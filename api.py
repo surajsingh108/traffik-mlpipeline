@@ -13,6 +13,7 @@ GET  /weather       Recent weather (last 24 hours)
 POST /predict       Single-stop delay prediction
 POST /retrain       Trigger champion/challenger retrain subprocess
 GET  /config        Public runtime config (Groq key for client-side NL parsing)
+GET  /upcoming      Upcoming departures at a station with model predictions
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import pickle
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import holidays
@@ -401,6 +402,114 @@ async def retrain():
         return {"status": "timeout", "duration_seconds": 600}
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
+
+
+@app.get("/upcoming")
+async def get_upcoming(
+    site_id: int,
+    window_minutes: int = 30,
+    line_id: str | None = None,
+    transport_mode: str | None = None,
+):
+    """
+    Return upcoming departures at a station with model delay predictions.
+
+    Queries DuckDB for departures scheduled in the next window_minutes,
+    deduplicates by (scheduled, line_id, transport_mode), and runs the
+    champion model on each row. Weather is taken from the latest DB row.
+    """
+    if _model is None or _config is None:
+        return {"departures": [], "error": "model not loaded"}
+
+    try:
+        conn = _get_db()
+
+        wx = conn.execute(
+            "SELECT temperature, wind_speed, precipitation, snowfall, cloud_cover "
+            "FROM weather ORDER BY timestamp DESC LIMIT 1"
+        ).df()
+        temp = wind = precip = snow = cloud = None
+        if not wx.empty:
+            r = wx.iloc[0]
+            def _f(v): return float(v) if pd.notna(v) else None
+            temp, wind, precip, snow, cloud = (
+                _f(r["temperature"]), _f(r["wind_speed"]), _f(r["precipitation"]),
+                _f(r["snowfall"]), _f(r["cloud_cover"]),
+            )
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        end_utc = now_utc + timedelta(minutes=window_minutes)
+
+        extra_where = ""
+        params: list = [site_id, now_utc, end_utc]
+        if line_id:
+            extra_where += " AND line_id = ?"
+            params.append(line_id)
+        if transport_mode:
+            extra_where += " AND transport_mode = ?"
+            params.append(transport_mode)
+
+        df = conn.execute(f"""
+            SELECT site_id, line_id, line_name, transport_mode, destination, scheduled
+            FROM (
+                SELECT *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY scheduled, line_id, transport_mode
+                        ORDER BY fetched_at DESC
+                    ) AS rn
+                FROM delays
+                WHERE site_id = ?
+                  AND scheduled > ?
+                  AND scheduled < ?
+                  {extra_where}
+            ) t
+            WHERE rn = 1
+            ORDER BY scheduled ASC
+            LIMIT 30
+        """, params).df()
+        conn.close()
+
+        if df.empty:
+            return {"departures": [], "window_minutes": window_minutes, "site_id": site_id}
+
+        line_id_map = _config.get("line_id_map", {})
+        site_id_map = {str(k): v for k, v in _config.get("site_id_map", {}).items()}
+
+        departures = []
+        for _, row in df.iterrows():
+            sched_utc = pd.Timestamp(row["scheduled"]).tz_localize("UTC")
+            try:
+                X = _build_row(
+                    site_id=int(row["site_id"]),
+                    line_id=str(row["line_id"]),
+                    transport_mode=str(row["transport_mode"]),
+                    scheduled=sched_utc.isoformat(),
+                    temperature=temp, wind_speed=wind, precipitation=precip,
+                    snowfall=snow, cloud_cover=cloud,
+                    config=_config,
+                )
+                pred = round(float(_model.predict(X)[0]), 2)
+            except Exception:
+                pred = None
+
+            departures.append({
+                "scheduled":      sched_utc.isoformat(),
+                "line_id":        str(row["line_id"]),
+                "line_name":      str(row["line_name"]),
+                "transport_mode": str(row["transport_mode"]),
+                "destination":    str(row["destination"]),
+                "delay_minutes":  pred,
+                "known_route":    (
+                    str(row["line_id"]) in line_id_map
+                    and str(int(row["site_id"])) in site_id_map
+                ),
+            })
+
+        return {"departures": departures, "window_minutes": window_minutes, "site_id": site_id}
+
+    except Exception as exc:
+        log.warning("upcoming failed: %s", exc)
+        return {"departures": [], "error": str(exc)}
 
 
 @app.get("/config")
