@@ -721,13 +721,21 @@ async function loadUpcoming() {
   const errEl   = document.getElementById('upcoming-error');
   const tbl     = document.getElementById('upcoming-table');
 
+  // Auto-reset from-time if it drifted into the past (stale page session)
+  const fromField = document.getElementById('from-time');
+  if (fromField.value && new Date(fromField.value) < new Date()) {
+    const dt = new Date();
+    dt.setSeconds(0, 0);
+    fromField.value = dt.toISOString().slice(0, 16);
+  }
+
   loadEl.classList.remove('hidden');
   emptyEl.classList.add('hidden');
   errEl.classList.add('hidden');
   tbl.classList.add('hidden');
 
   try {
-    const fromVal = document.getElementById('from-time').value;
+    const fromVal = fromField.value;
     const fromISO = fromVal ? new Date(fromVal).toISOString() : '';
     let url = `${API}/upcoming?site_id=${siteId}&window_minutes=${windowMinutes}`;
     if (fromISO) url += `&from_time=${encodeURIComponent(fromISO)}`;
@@ -758,7 +766,7 @@ async function loadUpcoming() {
           return;
         }
       }
-      emptyEl.textContent = 'No departures in the next 30 min. Data refreshes every 15 min.';
+      emptyEl.textContent = `No departures in the next ${windowMinutes} min. Data refreshes every 15 min.`;
       emptyEl.classList.remove('hidden');
       return;
     }
@@ -787,9 +795,9 @@ document.getElementById('f-site').addEventListener('change', () => {
   loadUpcoming();
 });
 
-// ── Groq rate limit: 5 calls per 30 min ──────────────────────────────────────
-const GROQ_LIMIT = 5;
-const GROQ_WINDOW_MS = 30 * 60 * 1000;
+// ── Groq rate limit: 10 calls per 15 min ─────────────────────────────────────
+const GROQ_LIMIT = 10;
+const GROQ_WINDOW_MS = 15 * 60 * 1000;
 const groqCallLog = []; // timestamps of recent calls
 
 function groqAllowed() {
@@ -840,7 +848,7 @@ document.getElementById('nl-parse-btn').addEventListener('click', async () => {
 
   if (!groqAllowed()) {
     const remaining = Math.ceil((GROQ_WINDOW_MS - (Date.now() - groqCallLog[0])) / 60000);
-    errEl.textContent = `Rate limit reached (5 per 30 min). Try again in ~${remaining} minute${remaining !== 1 ? 's' : ''}.`;
+    errEl.textContent = `Rate limit reached (10 per 15 min). Try again in ~${remaining} minute${remaining !== 1 ? 's' : ''}.`;
     errEl.classList.remove('hidden');
     return;
   }
