@@ -71,7 +71,7 @@ def backup_all() -> str:
             client.upload_blob(data, overwrite=True)
 
         backed_up.append(blob_name)
-        print(f"  OK Backed up {fname} → {CONTAINER}/{blob_name}")
+        print(f"  OK Backed up {fname} -> {CONTAINER}/{blob_name}")
 
     if skipped:
         print(f"  SKIP (not found locally): {skipped}")

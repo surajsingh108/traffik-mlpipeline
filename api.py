@@ -63,14 +63,46 @@ _config: dict | None = None
 _metrics: dict | None = None
 
 
+def _restore_from_blob() -> bool:
+    """Pull the latest model backup from Azure Blob Storage if available.
+    Returns True if anything was restored."""
+    conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
+    if not conn_str:
+        log.info("No AZURE_STORAGE_CONNECTION_STRING — skipping blob restore")
+        return False
+    try:
+        from model_backup import restore, list_backups
+        timestamps = list_backups()
+        if not timestamps:
+            log.warning("Blob restore: no backups found in container")
+            return False
+        latest = timestamps[0]
+        log.info("Restoring model from blob backup: %s", latest)
+        restore(latest)
+        return True
+    except Exception as exc:
+        log.warning("Blob restore failed (non-fatal): %s", exc)
+        return False
+
+
 def _load_artifacts() -> None:
     global _model, _config, _metrics
+
+    # If model is missing, try to pull from blob storage before giving up
+    if not MODEL_FILE.exists():
+        log.warning("Model file not found at %s — attempting blob restore", MODEL_FILE)
+        _restore_from_blob()
+
     if MODEL_FILE.exists():
         try:
             with open(MODEL_FILE, "rb") as f:
                 _model = pickle.load(f)
+            log.info("Model loaded from %s", MODEL_FILE)
         except Exception as exc:
             log.warning("Could not load model: %s", exc)
+    else:
+        log.warning("Model unavailable — API will run in degraded mode until retrain completes")
+
     if CONFIG_FILE.exists():
         try:
             _config = json.loads(CONFIG_FILE.read_text())
@@ -196,6 +228,16 @@ class PredictRequest(BaseModel):
 
 
 # ── endpoints ──────────────────────────────────────────────────────────────────
+
+@app.get("/ready")
+async def ready():
+    """Readiness probe — returns 200 only when model is loaded, 503 otherwise.
+    Container Apps readiness probe hits this; traffic is withheld until 200."""
+    from fastapi.responses import JSONResponse
+    if _model is not None:
+        return {"status": "ready"}
+    return JSONResponse(status_code=503, content={"status": "not_ready", "reason": "model not loaded"})
+
 
 @app.get("/health")
 async def health():
