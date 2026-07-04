@@ -88,11 +88,18 @@ _load_artifacts()
 
 # ── DB helper ──────────────────────────────────────────────────────────────────
 
-def _get_db(read_only: bool = True):
-    import duckdb
+def _get_db(read_only: bool = True, retries: int = 6, delay: float = 0.8):
+    import duckdb, time
     if not Path(DB_PATH).exists():
         raise FileNotFoundError(f"Database not found at {DB_PATH}")
-    return duckdb.connect(DB_PATH, read_only=read_only)
+    for attempt in range(retries):
+        try:
+            return duckdb.connect(DB_PATH, read_only=read_only)
+        except duckdb.IOException as exc:
+            if attempt == retries - 1:
+                raise
+            log.debug("DuckDB lock contention (attempt %d/%d): %s", attempt + 1, retries, exc)
+            time.sleep(delay)
 
 
 # ── inference helper ───────────────────────────────────────────────────────────
