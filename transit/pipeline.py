@@ -114,104 +114,16 @@ def _row_count(con: duckdb.DuckDBPyConnection, table: str) -> int:
     return con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-# ── sync: delays ───────────────────────────────────────────────────────────────
-
-def sync_delays(con: duckdb.DuckDBPyConnection) -> int:
-    """
-    Fetch a snapshot of SL departures and append to the delays table.
-
-    Delays are append-only (each poll is a new snapshot row); we do not
-    de-duplicate because the same departure may appear at different lag times.
-
-    Returns
-    -------
-    int
-        Number of rows inserted.
-    """
-    df = fetch_sl_departures(site_ids=DEFAULT_SITE_IDS)
-    if df.empty:
-        log.warning("sync_delays: no rows returned from SL API")
-        return 0
-
-    # DuckDB requires TIMESTAMPTZ — attach UTC zone info
-    for col in ("scheduled", "expected", "fetched_at"):
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], utc=True)
-
-    before = _row_count(con, "delays")
-    con.register("_delays_stage", df)
-    con.execute("""
-        INSERT INTO delays
-        SELECT
-            fetched_at, site_id, line_id, line_name,
-            transport_mode, direction, destination,
-            scheduled, expected, delay_minutes
-        FROM _delays_stage
-    """)
-    con.unregister("_delays_stage")
-    inserted = _row_count(con, "delays") - before
-    log.info("sync_delays: inserted %d rows (total %d)", inserted, before + inserted)
-    return inserted
-
-
-# ── sync: weather ──────────────────────────────────────────────────────────────
-
-def sync_weather(con: duckdb.DuckDBPyConnection, force_full: bool = False) -> int:
-    """
-    Upsert weather rows into the weather table.
-
-    On first run (empty table) back-fills BACKFILL_DAYS of history.
-    Subsequent calls fetch from the latest stored timestamp to today,
-    then append the 48-hour forecast.
-
-    Returns
-    -------
-    int
-        Number of new rows written.
-    """
-    latest = None if force_full else _max_ts(con, "weather")
-
-    if latest is None:
-        start = date.today() - timedelta(days=BACKFILL_DAYS)
-        log.info("sync_weather: back-filling from %s", start)
-    else:
-        # resume from latest stored row
-        start = (latest + timedelta(hours=1)).date()
-        log.info("sync_weather: incremental from %s", start)
-
-    end_archive = date.today()
-    df_arch = fetch_weather_archive(start, end_archive)
-    df_fcst = fetch_weather_forecast()
-
-    frames = [df for df in (df_arch, df_fcst) if not df.empty]
-    if not frames:
-        log.warning("sync_weather: no data from archive or forecast")
-        return 0
-
-    df = pd.concat(frames)
-    df = df[~df.index.duplicated(keep="last")].sort_index()
-    df = df.reset_index()
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-
-    before = _row_count(con, "weather")
-    con.register("_weather_stage", df)
-    con.execute("""
-        INSERT OR REPLACE INTO weather
-        SELECT timestamp, temperature, wind_speed, precipitation, snowfall, cloud_cover
-        FROM _weather_stage
-    """)
-    con.unregister("_weather_stage")
-    after = _row_count(con, "weather")
-    inserted = after - before
-    log.info("sync_weather: %d rows now in table (%+d)", after, inserted)
-    return inserted
-
-
 # ── main entry point ───────────────────────────────────────────────────────────
 
 def run_pipeline(force_full: bool = False) -> dict[str, int]:
     """
     Run one full sync cycle: delays + weather.
+
+    Network fetches happen BEFORE opening the write connection so the DB
+    write lock is held only during INSERT (milliseconds, not seconds).
+    Previously the write connection was open across SL + Open-Meteo HTTP
+    calls (up to 30 s on timeout), which starved API read-only connections.
 
     Parameters
     ----------
@@ -226,13 +138,78 @@ def run_pipeline(force_full: bool = False) -> dict[str, int]:
     import pathlib
     pathlib.Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
+    log.info("=== pipeline sync start ===")
+
+    # ── Phase 1: network fetches — no DB write lock held ─────────────────────
+
+    delays_df = fetch_sl_departures(site_ids=DEFAULT_SITE_IDS)
+    if delays_df.empty:
+        log.warning("sync_delays: no rows returned from SL API")
+    else:
+        for col in ("scheduled", "expected", "fetched_at"):
+            if col in delays_df.columns:
+                delays_df[col] = pd.to_datetime(delays_df[col], utc=True)
+
+    # Read weather watermark via a brief read-only connection (no write lock).
+    try:
+        con_ro = duckdb.connect(DB_PATH, read_only=True)
+        latest_wx = None if force_full else _max_ts(con_ro, "weather")
+        con_ro.close()
+    except Exception:
+        latest_wx = None
+
+    if latest_wx is None:
+        wx_start = date.today() - timedelta(days=BACKFILL_DAYS)
+        log.info("sync_weather: back-filling from %s", wx_start)
+    else:
+        wx_start = (latest_wx + timedelta(hours=1)).date()
+        log.info("sync_weather: incremental from %s", wx_start)
+
+    df_arch = fetch_weather_archive(wx_start, date.today())
+    df_fcst = fetch_weather_forecast()
+    frames = [df for df in (df_arch, df_fcst) if not df.empty]
+    if frames:
+        weather_df = pd.concat(frames)
+        weather_df = weather_df[~weather_df.index.duplicated(keep="last")].sort_index()
+        weather_df = weather_df.reset_index()
+        weather_df["timestamp"] = pd.to_datetime(weather_df["timestamp"], utc=True)
+    else:
+        weather_df = pd.DataFrame()
+        log.warning("sync_weather: no data from archive or forecast")
+
+    # ── Phase 2: write to DB — lock held only during INSERT (~ms) ─────────────
+
     con = duckdb.connect(DB_PATH)
     _init_db(con)
 
-    log.info("=== pipeline sync start ===")
+    delays_new = 0
+    if not delays_df.empty:
+        before = _row_count(con, "delays")
+        con.register("_delays_stage", delays_df)
+        con.execute("""
+            INSERT INTO delays
+            SELECT fetched_at, site_id, line_id, line_name,
+                   transport_mode, direction, destination,
+                   scheduled, expected, delay_minutes
+            FROM _delays_stage
+        """)
+        con.unregister("_delays_stage")
+        delays_new = _row_count(con, "delays") - before
+        log.info("sync_delays: inserted %d rows (total %d)", delays_new, before + delays_new)
 
-    delays_new  = sync_delays(con)
-    weather_new = sync_weather(con, force_full=force_full)
+    weather_new = 0
+    if not weather_df.empty:
+        before = _row_count(con, "weather")
+        con.register("_weather_stage", weather_df)
+        con.execute("""
+            INSERT OR REPLACE INTO weather
+            SELECT timestamp, temperature, wind_speed, precipitation, snowfall, cloud_cover
+            FROM _weather_stage
+        """)
+        con.unregister("_weather_stage")
+        after = _row_count(con, "weather")
+        weather_new = after - before
+        log.info("sync_weather: %d rows now in table (+%d)", after, weather_new)
 
     con.close()
     log.info("=== pipeline sync done: delays=%d weather=%d ===", delays_new, weather_new)

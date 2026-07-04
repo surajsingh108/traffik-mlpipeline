@@ -221,7 +221,7 @@
         </div>
 
         <!-- Bar chart (shown when delays exist) -->
-        <div id="chart-wrap" class="hidden relative h-40 mb-5">
+        <div id="chart-wrap" class="hidden relative h-44 mb-5">
           <canvas id="delay-chart"></canvas>
         </div>
 
@@ -526,23 +526,78 @@ async function loadDelays() {
     document.getElementById('chart-wrap').classList.toggle('hidden', !anyDelayed);
 
     if (anyDelayed) {
-      const rows = d.delays.slice(-20);
-      const labels = rows.map(x => x.line_name || x.line_id);
-      const values = rows.map(x => x.delay_minutes ?? 0);
-      const colors = values.map(v => v > 1 ? 'rgba(239,68,68,0.7)' : v > 0 ? 'rgba(251,191,36,0.7)' : 'rgba(34,197,94,0.7)');
+      // Group by line_id — one bar per unique line, sorted worst-first
+      const lineMap = {};
+      d.delays.forEach(x => {
+        if (!lineMap[x.line_id]) {
+          lineMap[x.line_id] = { name: x.line_name || x.line_id, mode: x.transport_mode, sum: 0, n: 0, max: 0 };
+        }
+        const v = x.delay_minutes ?? 0;
+        lineMap[x.line_id].sum += v;
+        lineMap[x.line_id].n++;
+        if (v > lineMap[x.line_id].max) lineMap[x.line_id].max = v;
+      });
+      const grouped = Object.values(lineMap)
+        .map(l => ({ ...l, avg: l.sum / l.n }))
+        .sort((a, b) => b.avg - a.avg);
+
+      const labels = grouped.map(l => l.name);
+      const values = grouped.map(l => parseFloat(l.avg.toFixed(2)));
+      const colors = values.map(v =>
+        v >= 2   ? 'rgba(239,68,68,0.82)'
+        : v >= 0.5 ? 'rgba(251,191,36,0.82)'
+        : 'rgba(75,85,99,0.45)'
+      );
+
       const ctx = document.getElementById('delay-chart').getContext('2d');
       if (delayChart) delayChart.destroy();
       delayChart = new Chart(ctx, {
         type: 'bar',
-        data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, borderSkipped: false }] },
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderRadius: 4,
+            borderSkipped: false,
+            barPercentage: 0.65,
+          }]
+        },
         options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw.toFixed(2)} min delay` } } },
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: items => {
+                  const l = grouped[items[0].dataIndex];
+                  return `${modeIcon(l.mode)} Line ${l.name} · ${l.mode}`;
+                },
+                label: c => {
+                  const l = grouped[c.dataIndex];
+                  return [
+                    `Avg delay: ${l.avg.toFixed(2)} min`,
+                    `Peak delay: ${l.max.toFixed(2)} min`,
+                    `Trips sampled: ${l.n}`,
+                  ];
+                },
+              },
+            },
+          },
           scales: {
-            x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: { size: 10 } } },
-            y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6b7280', font: { size: 10 } }, title: { display: true, text: 'delay (min)', color: '#6b7280', font: { size: 10 } } }
-          }
-        }
+            x: {
+              grid: { display: false },
+              ticks: { color: '#9ca3af', font: { size: 11, weight: '500' } },
+            },
+            y: {
+              grid: { color: 'rgba(255,255,255,0.04)' },
+              ticks: { color: '#6b7280', font: { size: 10 } },
+              title: { display: true, text: 'avg delay (min)', color: '#6b7280', font: { size: 10 } },
+              beginAtZero: true,
+            },
+          },
+        },
       });
     }
 
