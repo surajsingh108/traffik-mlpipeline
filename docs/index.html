@@ -454,10 +454,14 @@ function updateTicker(delays) {
     const min = (x.delay_minutes ?? 0).toFixed(1);
     const siteId = x.site_id;
     const stationName = Object.entries(STATIONS).find(([,id]) => id === siteId)?.[0] || '';
+    const schedTime = x.scheduled
+      ? new Date(x.scheduled).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+      : null;
+    const timeLabel = schedTime ? ` at ${schedTime}` : '';
     return `<span class="px-6 cursor-pointer hover:text-white transition-colors"
       data-line="${x.line_id}" data-mode="${x.transport_mode}" data-site="${siteId}"
       onclick="fillFromTicker(this)">
-      ${mode} ${name}${stationName ? ' · ' + stationName : ''} · ${min} min late
+      ${mode} ${name}${stationName ? ' · ' + stationName : ''}${timeLabel} was ${min} min late
     </span>
     <span class="px-2 text-amber-700">|</span>`;
   }).join('');
@@ -530,12 +534,17 @@ async function loadDelays() {
       const lineMap = {};
       d.delays.forEach(x => {
         if (!lineMap[x.line_id]) {
-          lineMap[x.line_id] = { name: x.line_name || x.line_id, mode: x.transport_mode, sum: 0, n: 0, max: 0 };
+          lineMap[x.line_id] = { name: x.line_name || x.line_id, mode: x.transport_mode, sum: 0, n: 0, max: 0, maxTime: null };
         }
         const v = x.delay_minutes ?? 0;
         lineMap[x.line_id].sum += v;
         lineMap[x.line_id].n++;
-        if (v > lineMap[x.line_id].max) lineMap[x.line_id].max = v;
+        if (v > lineMap[x.line_id].max) {
+          lineMap[x.line_id].max = v;
+          lineMap[x.line_id].maxTime = x.scheduled
+            ? new Date(x.scheduled).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+            : null;
+        }
       });
       const grouped = Object.values(lineMap)
         .map(l => ({ ...l, avg: l.sum / l.n }))
@@ -576,9 +585,12 @@ async function loadDelays() {
                 },
                 label: c => {
                   const l = grouped[c.dataIndex];
+                  const peakLabel = l.maxTime
+                    ? `Peak: ${l.max.toFixed(1)} min late (sched. ${l.maxTime})`
+                    : `Peak: ${l.max.toFixed(1)} min late`;
                   return [
                     `Avg delay: ${l.avg.toFixed(2)} min`,
-                    `Peak delay: ${l.max.toFixed(2)} min`,
+                    peakLabel,
                     `Trips sampled: ${l.n}`,
                   ];
                 },
